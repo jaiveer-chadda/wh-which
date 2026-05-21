@@ -1,33 +1,32 @@
 #!/usr/bin/env zsh
 
-
-##region 0 - wh()  —————————————————————————————————————————————————————————— #
-
 wh() {
-  ##region 0.1 - Flag/Input-Handling  ——————————————————————————————————— #
+  setopt local_options warn_create_global extended_glob
 
-  local -i 2 {internal_mode,display_indices}=0 {draw_lines,do_all}=1
+  local -i 2 internal_mode=0 display_indices=0
+  local -i 2 draw_lines=1 do_all=1
 
-  while getopts 'xilA' opt; do
+  while { getopts 'xilA' opt; } { #
     case "$opt" {
-      x)   internal_mode=1 ;;
-      i) display_indices=1 ;;
-      l)      draw_lines=0 ;;
-      A)          do_all=0 ;;
+      ( x )   internal_mode=1 ;;
+      ( i ) display_indices=1 ;;
+      ( l )      draw_lines=0 ;;
+      ( A )          do_all=0 ;;
     }
-  done
+  }
+
   shift $(( OPTIND - 1 ))
 
-  if (( internal_mode )) local {display_indices,draw_lines,do_all}=0
+  if (( internal_mode )) display_indices=0 draw_lines=0 do_all=0
 
-  if (( $# == 0 )) { echo "$0: must enter a command" >&2; return 1; }
+  if ! (( $# )) {
+    echo "$0: must enter a command" >&2
+    return 1
+  }
+
+  local -r NL=$'\n'
 
   local -r command="$1"
-
-  ##endregion 0.1 - Flag/Input-Handling  ———————————————————————————————— #
-
-
-  ##region 0.2 - Constant-Definitions  —————————————————————————————————— #
 
   local -r _alias_prefix="$command: aliased to "
   local -r _builtin_line="$command: shell built-in command"
@@ -67,27 +66,24 @@ wh() {
   # these are in order of preference, i.e. 'bat' first, 'cat' second, etc.
   local -ra _visualisers=(
     'bat --language=zsh --paging=never --style=plain --color=always'
-    'cat -u'
+    "$PAGER"
+    'cat'
   )
 
   local visualiser
   # loop through all of the possible visualisers
   for visualiser in "${(@)_visualisers}" ''; {
     # if one of the commands succeeds, then break,
-    #  and $visualiser will be set to that value
-    command -v "${visualiser/% **}" &>/dev/null && break
-    # if they all fail, then $visualiser will be unset (set to '')
+    #  and `$visualiser` will be set to that value
+    command -v "${visualiser%% *}" &>/dev/null && break
+    # if they all fail, then `$visualiser` will be unset (set to '')
   }
-
-  ##endregion 0.2 - Constant-Definitions  ——————————————————————————————— #
-
-
-  ##region 0.3 - Parsing-which-Output  —————————————————————————————————— #
 
   local which_output dash_a=
   if (( do_all )) dash_a='-a'
-  which_output="$( which $dash_a -- "$command" 2>&1 )" || {
-    echo "$0: '$command' not found" >&2
+
+  which_output="$( which $dash_a -- "$command" )" || {
+    echo -E - "$0: \`$command\` not found" >&2
     return 1
   }
 
@@ -97,21 +93,23 @@ wh() {
   local -i 2 is_reading_func=0
 
   local line file_type func_path
-  for line in "${(f)which_output}"; {
+  for line in "${(@f)which_output}"; {
 
     # Function body & end
     if (( is_reading_func )) {
-      # stop reading the function
-      if [[ "${line[1]}" == "$_function_end" ]] is_reading_func=0
+      # if we've reached the end, stop reading the function
+      if [[ "$line[1]" == "$_function_end" ]] is_reading_func=0
 
       # make sure that escape chars aren't accidentally expanded
       line="${line//\\/\\\\}"
 
       # put `then`/`do` on the same line as `if`/`for`/`while`
-      if [[ "$line" =~ '^\s*(then|do) *$' ]] {
-        all_definitions[-1]+="; ${line/#[[:space:]]#}"
+      # if [[ "$line" =~ '^\s*(then|do) *$' ]] {
+      if [[ "$line" == ' '#(then|do)' '# ]] {
+        all_definitions[-1]+="; ${(*)line/#[[:space:]]#}"
         continue
       }
+
       all_definitions[-1]+=$'\n'"$line"
       continue
     }
@@ -119,55 +117,50 @@ wh() {
     case "$line" {
 
       # function
-      "$_function_start")
-        func_path="$( wh::get_path "$command" )"
-        all_definitions+=( "$func_path\nfunction $line" )
-
-        def_type+=( 'function' )
+      ( "$_function_start" )
         is_reading_func=1
-        ;;
+        def_type+=function
+
+        func_path="$( wh::get_path "$command" )"
+        all_definitions+="$func_path${NL}function $line"
+      ;;
 
       # alias
-      "$_alias_prefix"*)
-        all_definitions+=( "${line/$_alias_prefix}" )
-        def_type+=( 'alias' )
-        ;;
+      ( "$_alias_prefix"* )
+        def_type+=alias
+        all_definitions+="${line/$_alias_prefix}"
+      ;;
 
       # builtin
-      "$_builtin_line")
-        all_definitions+=( "$line" )
-        def_type+=( 'builtin' )
-        ;;
+      ( "$_builtin_line" )
+        def_type+=builtin
+        all_definitions+="$line"
+      ;;
 
       # posix_exe, mach_o_bin, bash_exe, zsh_exe, general_exe, other_exe
-      "$_file_prefix"*)
-        all_definitions+=( "$line" )
-
+      ( "$_file_prefix"* )
+        all_definitions+="$line"
         file_type="$( file -b "$line" )"
-        # only get the first line of the output
-        case "${file_type/$'\n'*}" {
-          "$_posix_exe_prefix"*              ) def_type+=( 'posix_exe'   ) ;;
-          "$_mach_o_bin_prefix"*             ) def_type+=( 'mach_o_bin'  ) ;;
-          "$_bash_exe_prefix"*"$_ascii_text" ) def_type+=( 'bash_exe'    ) ;;
-         *"$_zsh_exe_infix"*"$_ascii_text"   ) def_type+=( 'zsh_exe'     ) ;;
-          "$_ascii_text"                     ) def_type+=( 'general_exe' ) ;;
-          *                                  ) def_type+=( 'other_exe'   ) ;;
-        }
-        ;;
 
-      # unknown
-      *)
-        all_definitions+=( "$line" )
-        def_type+=( 'unknown' )
-        ;;
+        # only get the first line of the output
+        case "${file_type/$NL*}" {
+         (  "$_posix_exe_prefix"*              ) def_type+=posix_exe   ;;
+         (  "$_mach_o_bin_prefix"*             ) def_type+=mach_o_bin  ;;
+         (  "$_bash_exe_prefix"*"$_ascii_text" ) def_type+=bash_exe    ;;
+         ( *"$_zsh_exe_infix"*"$_ascii_text"   ) def_type+=zsh_exe     ;;
+         (  "$_ascii_text"                     ) def_type+=general_exe ;;
+         ( *                                   ) def_type+=other_exe   ;;
+        }
+      ;;
+
+      ( * ) # unknown
+        def_type+=unknown
+        all_definitions+="$line"
+      ;;
     }
   }
 
-  ##endregion 0.3 - Parsing-which-Output  ——————————————————————————————— #
-
   # ——————————————————————————————————————————————————————————————————————— #
-
-  ##region 0.4 - Displaying-Output  ————————————————————————————————————— #
 
   if (( draw_lines )) wh::draw_separator_line outside
 
@@ -180,8 +173,8 @@ wh() {
   local -i 10 i run_func is_path
 
   for i in {1.."$definition_count"}; {
-    type="${def_type[i]}"
-    body="${all_definitions[i]}"
+    type="$def_type[i]"
+    body="$all_definitions[i]"
 
     if (( draw_lines && i != 1 )) wh::draw_separator_line inside
 
@@ -196,67 +189,52 @@ wh() {
          is_path="${_types[$type][3]}"
     display_type="${_types[$type][5,-1]}"
 
-    if ! [[ "$type" =~ '^(function|alias|builtin)$' ]] \
-      || (( internal_mode )) echo "$display_type"
+    if [[ "$type" != (function|alias|builtin) ]] || (( internal_mode )) {
+      echo -E - "$display_type"
+    }
 
-    # if there's a dedicated function for this type, run it
-    if (( run_func )) {
+    if (( run_func )) { # if there's a dedicated function for this type, run it
       wh::"$type"    \
         "$body"       \
         "$visualiser"  \
         "$command"      \
         "$internal_mode" \
         "$func_path"
-      continue
-    }
 
-    # if the type is a path, pretty print it
-    if (( is_path )) { wh::echo_coloured_path "$body"; echo; continue; }
-    # otherwise just print the body
-    echo "$body"
+    } elif (( is_path )) {  # if the type is a path, pretty print it
+      wh::echo_coloured_path "$body"
+      echo
+
+    } else {  # otherwise just print the body
+      echo -E - "$body"
+    }
   }
 
   if (( draw_lines )) wh::draw_separator_line outside
 
   return 0
-
-  ##endregion 0.4 - Displaying-Output  —————————————————————————————————— #
 }
-
-##endregion 0 - wh()  ——————————————————————————————————————————————————————— #
-
 
 # ——————————————————————————————————————————————————————————————————————————— #
 
-
-##region 1 - Visualisation-Functions  ——————————————————————————————————————— #
-
-
-##region 1.1 - wh::function()  —————————————————————————————————————————— #
-
 wh::function() {
   local -r body="$1" vis="$2" from="$5"
-  # greedily capture everything ( ** ),
-  #  from the first space until the end of the string ( % )
-  local -r vis_command="${vis/% **}"
+  # greedily capture everything ( `%%` ),
+  #  from the first space until the end of the string ( `%` )
+  local -r vis_command="${vis%% *}"
   local -ra vis_args=( "${(z)vis/$vis_command}" )
 
-  echo "$body" | command "$vis_command" "${(@)vis_args}"
+  echo -E - "$body" | command "$vis_command" "${(@)vis_args}"
 }
 
-##endregion 1.1 - wh::function()  ——————————————————————————————————————— #
-
-
-##region 1.2 - wh::alias()  ————————————————————————————————————————————— #
-
 wh::alias() {
-  local -r sq="'" dq='"'
+  local -r sq=\' dq=\"
 
-  local -r _equals_colour=$'\e[38;2;148;226;213m'
-  local -r  _alias_colour=$'\e[38;2;203;166;247m'
-  local -r  _quote_colour=$'\e[38;2;166;227;161m'
-  local -r    _cmd_colour=$'\e[38;2;137;180;250m'
-  local -r         _reset=$'\e[0m'
+  local -r _equals_colour=$'\e[38;5;116m'  #94E2D5
+  local -r  _alias_colour=$'\e[38;5;183m'  #CBA6F7
+  local -r  _quote_colour=$'\e[38;5;114m'  #A6E3A1
+  local -r    _cmd_colour=$'\e[38;5;111m'  #89B4FA
+  local -r         _reset=$'\e[m'
 
   local           body="$1"
   local -r  visualiser="$2"
@@ -266,11 +244,11 @@ wh::alias() {
   # if the alias is just aliasing another command,
   #  then show that command's `wh` entry instead
   # also check that we're not in internal mode, so we don't end up recursing
-  setopt rematch_pcre
+  setopt local_options rematch_pcre
   local -i 2 in_secondary_mode=0
   if ! (( internal )) && [[ "$body" =~ '^ *(command +)?((\w|[-+.:])+) *$' ]] {
-    local -r secondary_cmd="${match[2]}"
-    local -r secondary_indent=$'\n\t\e[38;2;64;68;84m│\e[0m '
+    local -r secondary_cmd="$match[2]"
+    local -r secondary_indent=$'\n\t\e[38;5;238m│\e[m '  #404454
     in_secondary_mode=1
   }
 
@@ -298,18 +276,18 @@ wh::alias() {
 
   # ————————————————————————————————————————————————————————————————— #
 
-  # greedily capture everything ( ** ),
-  #  from the first space until the end of the string ( % )
-  local -r vis_command="${visualiser/% **}"
+  # greedily capture everything ( `%%` ),
+  #  from the first space until the end of the string ( `%` )
+  local -r vis_command="${visualiser%% *}"
   local -ra vis_args=( "${(z)visualiser/$vis_command}" )
 
-  echo -n "$alias_text$cmd_text$equals$quote"
+  echo -nE - "$alias_text$cmd_text$equals$quote"
 
-  echo -n "$quoted_body" \
+  echo -nE "$quoted_body" \
     | command "$vis_command" "${(@)vis_args}" \
     | sed "s/\\\'/$_cmd_colour\\\'$_quote_colour/g"
 
-  echo -n "$quote"
+  echo -nE "$quote"
 
   # ————————————————————————————————————————————————————————————————— #
 
@@ -325,121 +303,97 @@ wh::alias() {
   local article='a'
   if [[ "$sub_cmd_type[1]" =~ '[aeiou]' ]] article+='n'
 
-  echo -n ", where $_cmd_colour$body$_reset is $article $sub_cmd_type"
-  echo "$secondary_indent${(pj:$secondary_indent:)sub_cmd_body}"
+  echo -nE ", where $_cmd_colour$body$_reset is $article $sub_cmd_type"
+  echo -E "$secondary_indent${(pj:$secondary_indent:)sub_cmd_body}"
 
 }
 
-##endregion 1.2 - wh::alias()  —————————————————————————————————————————— #
-
-
-##region 1.3 - wh::builtin()  ——————————————————————————————————————————— #
-
 wh::builtin() {
-  local -r _cmd_colour=$'\e[38;2;137;180;250m'
-  local -r _shl_colour=$'\e[38;2;184;076;080m'
-  local -r _reset=$'\e[0m'
+  local -r _cmd_colour=$'\e[38;5;111m'  #89B4FA
+  local -r _shl_colour=$'\e[38;5;131m'  #B84C50
+  local -r _reset=$'\e[m'
 
   # get the last part of the path of whichever shell they're using
-  local -r shl_name="${${SHELL:-$BASH}/\/**\/}"
+  local -r shl_name="${${SHELL:-$BASH}/\/*\/}"
   local -r cmd_name="${1/%:*}"
 
   local -r shl_coloured="$_shl_colour$shl_name$_reset"
   local -r cmd_coloured="$_cmd_colour$cmd_name$_reset"
 
-  echo -n "$cmd_coloured is a $shl_coloured ("
-  wh::echo_coloured_path "$SHELL"; echo ') builtin'
+  echo -nE "$cmd_coloured is a $shl_coloured ("
+  wh::echo_coloured_path "$SHELL"
+  echo ') builtin'
 }
-
-##endregion 1.3 - wh::builtin()  ———————————————————————————————————————— #
-
-
-##endregion 1 - Visualisation-Functions  ———————————————————————————————————— #
-
 
 # ——————————————————————————————————————————————————————————————————————————— #
 
-
-##region 2 - Helper-Functions  —————————————————————————————————————————————— #
-
-
-##region 2.1 - wh::draw_separator_line()  ——————————————————————————————— #
-
 wh::draw_separator_line() {
-  local -r _outside_colour=$'\e[38;2;128;135;162m'
-  local -r  _inside_colour=$'\e[38;2;064;068;084m'
-  local -r _reset=$'\e[0m' _line_char='─'
+  local -r _outside_colour=$'\e[38;5;103m'  #8087A2
+  local -r  _inside_colour=$'\e[38;5;238m'  #404454
+  local -r _reset=$'\e[m' _line_char='─'
 
   local -r colour="_${1}_colour"
   echo "${(P)colour}${(pr:$(( COLUMNS * .8 ))::$_line_char:)}$_reset"
 }
 
-##endregion 2.1 - wh::draw_separator_line()
-
-
-##region 2.2 - wh::echo_coloured_path()
-
 wh::echo_coloured_path() {
-  local -r   _leading_colour=$'\e[38;2;053;063;090m'
-  local -r      _body_colour=$'\e[38;2;109;142;197m'
-  local -r  _basename_colour=$'\e[38;2;184;076;080m'
-  local -r _underline_colour=$'\e[58;2;098;139;205;4m'
+  local -r   _leading_colour=$'\e[38;5;060m'    #353F5A
+  local -r      _body_colour=$'\e[38;5;068m'    #6D8EC5
+  local -r  _basename_colour=$'\e[38;5;131m'    #B84C50
+  local -r _underline_colour=$'\e[58;5;068;4m'  #628BCD
 
   local -r _underline_off=$'\e[24m'
-  local -r _reset_all=$'\e[0m'
+  local -r _reset_all=$'\e[m'
 
   local -r path_="${1/$HOME/~}"
 
-  local -r body="${(S)${(S)path_/#*\/}/%\/*}"
-  local -r leading="${path_/%\/**}"
-  local -r basename="${path_/#**\/}"
+  local -r body="${${path_#*\/}%\/*}"
+  local -r leading="${path_%%\/*}"
+  local -r basename="${path_##*\/}"
 
-  echo -n "$_underline_colour"
-  echo -n "$_leading_colour$leading/"
-  echo -n "$_body_colour$body"
-  echo -n "$_underline_off/$_underline_colour"
-  echo -n "$_basename_colour$basename$_reset_all"
+  echo -nE "$_underline_colour"
+  echo -nE "$_leading_colour$leading/"
+  echo -nE "$_body_colour$body"
+  echo -nE "$_underline_off/$_underline_colour"
+  echo -nE "$_basename_colour$basename$_reset_all"
 }
-
-##endregion 2.2 - wh::echo_coloured_path()  ————————————————————————————— #
-
-
-##region 2.3 - wh::get_path
 
 wh::get_path() {
   local -r whence_out="$( whence -va "$1" )"
 
   local abs_path="${${whence_out#*is a *function from }%$'\n'*}"
-  local rel_path="$( grealpath --no-symlinks --relative-to=. "$abs_path" )"
+
+  local -i 2 do_rel_path=1
+  local rel_path; rel_path="$(
+    grealpath --no-symlinks --relative-to=. "$abs_path" 2>/dev/null
+  )" || do_rel_path=0
 
   abs_path="${abs_path/#$HOME/~}"
-  if [[ "${rel_path[1,3]}" != '../' ]] rel_path="./$rel_path"
 
-  echo "# $abs_path"
-  if (( $#rel_path <= COLUMNS / 2 )) && [[ "$PWD" != "$HOME" ]] \
-    echo "# $rel_path"
+  echo -E "# $abs_path"
+
+  if [[ "$rel_path" != '../'* ]] rel_path="./$rel_path"
+
+  if (( do_rel_path && $#rel_path <= $#abs_path )) \
+    && [[ "$PWD" != "$HOME" && "$abs_path" != '~'* ]] {
+    echo -E "# $rel_path"
+  }
 }
-
-##endregion 2.3 - wh::get_path
-
-
-##endregion 2 - Helper-Functions  ——————————————————————————————————————————— #
-
 
 # ——————————————————————————————————————————————————————————————————————————— #
 
 wh::__test__() {
-  local -r col=$'\e[38;2;128;125;237m'
-  local -r rst=$'\e[0m'
+  local -r col=$'\e[38;5;105m'
+  local -r rst=$'\e[m'
 
-  local -ra _inputs_to_test=( 'config' 'echo' 'nv' )
+  local -ra _inputs_to_test=( config echo nv wh::__test__ )
 
   local input func title
   for input in "${(@)_inputs_to_test}"; {
-    title="${(r:$(( COLUMNS - $#input + 15 ))::─:)input/%/$col }"
-    echo "$col───$rst $title $rst"
+    title="${(r:$(( COLUMNS - $#input + 9 ))::─:)input/%/$col }"
+    echo -E "$col───$rst $title $rst"
 
-    echo "${$( whence -va "$input" )/$HOME/~}"; echo
+    # echo "${$( whence -va "$input" )/$HOME/~}"; echo
     wh "$input"
   }
 }
