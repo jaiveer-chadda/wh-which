@@ -5,27 +5,25 @@ wh() {
 
   local -r error="$0:"
 
-  local -i 2 internal_mode=0 do_indices=0
-  local -i 2 do_lines=1 do_all=1
+  local -i 2 internal_mode=0 do_lines=1 do_all=1
 
   local opt OPTIND OPTARG
-  while { getopts 'xilA' opt; } { #
+  while { getopts 'xlA' opt; } { #
     case "$opt" {
       ( x ) internal_mode=1 ;;
-      ( i )    do_indices=1 ;;
       ( l )      do_lines=0 ;;
       ( A )        do_all=0 ;;
+      ( * )        return 1 ;;
     }
   }
-
   shift $(( OPTIND - 1 ))
-
-  if (( internal_mode )) do_indices=0 do_lines=0 do_all=0
 
   if ! (( $# )) {
     echo "$error must enter a command" >&2
     return 1
   }
+
+  if (( internal_mode )) do_lines=0 do_all=0
 
   # ————————————————————————————————————————————————————————————————— #
 
@@ -46,7 +44,7 @@ wh() {
   local -r    l_grey=$'\e[38;5;103m'  #8087A2
   local -r blue_udln=$'\e[58;5;68;4m' #6D8EC5
 
-  local -ri 10 line_len=$(( COLUMNS * 0.6 ))
+  local -ri 10 line_len=$(( COLUMNS / 2 ))
 
   local -r outside_line="$l_grey${(r:$line_len::─:)}$reset"
   local -r  inside_line="$d_grey${(r:$line_len::─:)}$reset"
@@ -102,7 +100,7 @@ wh() {
   for visualiser in "${(@)_visualisers}" ''; {
     # if one of the commands succeeds, then break,
     #  and `$visualiser` will be set to that value
-    command -v "${visualiser%% *}" &>/dev/null && break
+    command -v -- "${visualiser%% *}" &>/dev/null && break
     # if they all fail, then `$visualiser` will be unset (set to '')
   }
 
@@ -150,7 +148,7 @@ wh() {
       # alias
       ( "$alias_prefix"* )
         def_type+=alias
-        all_definitions+="${line/$alias_prefix}"
+        all_definitions+="${line#$alias_prefix}"
       ;;
 
       # builtin
@@ -165,7 +163,7 @@ wh() {
         file_type="$( file --brief "$line" )"
 
         # only get the first line of the output
-        case "${file_type/$NL*}" {
+        case "${file_type%%$NL*}" {
          (  "$posix_exe_prefix"*             ) def_type+=posix_exe   ;;
          (  "$mach_o_bin_prefix"*            ) def_type+=mach_o_bin  ;;
          (  "$bash_exe_prefix"*"$ascii_text" ) def_type+=bash_exe    ;;
@@ -184,29 +182,19 @@ wh() {
 
   # ——————————————————————————————————————————————————————————————————————— #
 
-  local -ri 10 definition_count=${#all_definitions}
-  local -ri 10    def_count_len=${#definition_count}
-
-  local -ri 10 subtitle_len=$(( def_count_len + max_type_len ))
+  local -ri 10 def_count=${#all_definitions}
 
   local type display_type body
   local -i 10 i run_func is_path
 
-  if (( definition_count == 1 )) do_lines=0
+  if (( def_count < 2 )) do_lines=0
+  if (( do_lines      )) echo "$outside_line"
 
-  if (( do_lines )) echo "$outside_line"
-
-  for i in {1.."$definition_count"}; {
+  for i in {1..$def_count}; {
     type="$def_type[i]"
     body="$all_definitions[i]"
 
     if (( do_lines && i != 1 )) echo "$inside_line"
-
-    # Print out the subtitle, which is:
-    #  - the index, right-aligned,
-    #    - so if there are >= 10 results, they the indices line up
-    #  - a literal '.␣', to separate the index from the output type
-    if (( do_indices )) echo -n "${(l:$def_count_len:)i}. "
 
     # I'm storing some extra data in the first few chars of the type names
         run_func="${types[$type][1]}"
@@ -217,13 +205,8 @@ wh() {
       echo -E - "$display_type"
     }
 
-    if (( run_func )) { # if there's a dedicated function for this type, run it
-      wh::"$type"    \
-        "$body"       \
-        "$visualiser"  \
-        "$command"      \
-        "$internal_mode" \
-        "$func_path"
+    if (( run_func )) {  # if there's a function for this type, run it
+      wh::"$type"
 
     } elif (( is_path )) {  # if the type is a path, pretty print it
       wh::echo_coloured_path "$body"
@@ -243,30 +226,26 @@ wh() {
 # ——————————————————————————————————————————————————————————————————————————— #
 
 wh::function() {
-  local -r body="$1" vis="$2" from="$5"
   # greedily capture everything ( `%%` ),
   #  from the first space until the end of the string ( `%` )
-  local -r vis_command="${vis%% *}"
-  local -ra vis_args=( "${(z)vis/$vis_command}" )
+  local -r vis_command="${visualiser%% *}"
+  local -ra vis_args=( "${(z)visualiser/$vis_command}" )
 
   echo -E - "$body" | command "$vis_command" "${(@)vis_args}"
 }
 
 wh::alias() {
-  local           body="$1"
-  local -r  visualiser="$2"
-  local -r     command="$3"
-  local -ri 2 internal="$4"
-
-  # if the alias is just aliasing another command,
-  #  then show that command's `wh` entry instead
-  # also check that we're not in internal mode, so we don't end up recursing
   setopt local_options rematch_pcre
   local -a match mbegin mend
   local    MATCH MBEGIN MEND
 
   local -i 2 in_secondary_mode=0
-  if ! (( internal )) && [[ "$body" =~ '^ *(command +)?((\w|[-+.:])+) *$' ]] {
+
+  # if the alias is just aliasing another command,
+  #  then show that command's `wh` entry instead
+  # also check that we're not in internal mode, so we don't end up recursing
+  if ! (( internal_mode )) \
+    && [[ "$body" =~ '^ *(command +)?((\w|[-+.:])+) *$' ]] {
     local -r secondary_cmd="$match[2]"
     local -r secondary_indent="$NL    $d_grey│$reset "
     in_secondary_mode=1
@@ -316,29 +295,29 @@ wh::alias() {
   # ————————————————————————————————————————————————————————————————— #
 
   if ! (( in_secondary_mode )) echo && return
-  body="${secondary_cmd:-$body}"
+  local -r second_body="${secondary_cmd:-$body}"
 
-  local -ra sub_cmd_lines=( "${(@f)$( wh -x -- "$body" )}" )
+  local -ra sub_cmd_lines=( "${(@f)$( wh -x -- "$second_body" )}" )
   local -ra sub_cmd_body=( "${(@)sub_cmd_lines[2,-1]}" )
-  local     sub_cmd_type="$sub_cmd_lines[1]:"
+  local -r  sub_cmd_type="$sub_cmd_lines[1]:"
 
   local article='a'
   if [[ "$sub_cmd_type" == [aeiou]* ]] article='an'
 
-  echo -nE ", where $l_blue$body$reset is $article $sub_cmd_type"
+  echo -nE ", where $l_blue$second_body$reset is $article $sub_cmd_type"
   echo -E "$secondary_indent${(pj:$secondary_indent:)sub_cmd_body}"
 }
 
 wh::builtin() {
   # get the last part of the path of whichever shell they're using
   local -r shl_name="${${SHELL:-$BASH}/\/*\/}"
-  local -r cmd_name="${1%%:*}"
+  local -r cmd_name="${body%%:*}"
 
   local -r shl_coloured="$d_red$shl_name$reset"
   local -r cmd_coloured="$l_blue$cmd_name$reset"
 
   echo -nE "$cmd_coloured is a $shl_coloured ("
-  wh::echo_coloured_path "$SHELL"
+  wh::echo_coloured_path "${SHELL:-$BASH}"
   echo ') builtin'
 }
 
@@ -348,19 +327,18 @@ wh::builtin() {
 wh::echo_coloured_path() {
   local -r path_="${1/$HOME/~}"
 
-  local -r body="${${path_#*\/}%\/*}"
+  local -r path_body="${${path_#*\/}%\/*}"
   local -r leading_segment="${path_%%\/*}"
   local -r basename="${path_##*\/}"
 
   echo -nE "$blue_udln$d_blue$leading_segment/"
-  echo -nE "$m_blue$body"
+  echo -nE "$m_blue$path_body"
   echo -nE "$no_udln/$blue_udln"
   echo -nE "$d_red$basename$reset"
 }
 
 wh::get_path() {
   local -r whence_out="$( whence -va "$1" )"
-
   local abs_path="${${whence_out#*is a *function from }%$NL*}"
 
   local -i 2 do_rel_path=1
@@ -370,8 +348,9 @@ wh::get_path() {
 
   abs_path="${abs_path/#$HOME/~}"
 
-  if [[ "$rel_path" != '../'* ]] rel_path="./$rel_path"
+  if [[ "$rel_path" != */* && "$rel_path" != ../* ]] rel_path="./$rel_path"
 
+  # only display `$abs_path` if it actually has a value
   echo -nE "${abs_path:+# $abs_path$NL}"
 
   if (( do_rel_path && $#rel_path > 0 && $#rel_path <= $#abs_path )) \
@@ -394,8 +373,7 @@ wh::__test__() {
     title="${(r:$(( COLUMNS - $#input + 7 ))::─:)input/%/$col }"
     echo -E "$col───$rst $title $rst"
 
-    # echo "${$( whence -va "$input" )/$HOME/~}"; echo
-    wh "$input"
+    wh "$@" "$input"
   }
 }
 
