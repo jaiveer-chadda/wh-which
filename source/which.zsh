@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 
 wh() {
-  setopt local_options warn_create_global extended_glob
+  setopt local_options warn_create_global warn_nested_var extended_glob
 
   local -i 2 internal_mode=0 display_indices=0
   local -i 2 draw_lines=1 do_all=1
@@ -24,7 +24,21 @@ wh() {
     return 1
   }
 
+  # ————————————————————————————————————————————————————————————————— #
+
   local -r NL=$'\n'
+  local -r _line_char='─'
+
+  local -r reset=$'\e[m'
+
+  local -r _outside_col=$'\e[38;5;103m'  #8087A2
+  local -r  _inside_col=$'\e[38;5;238m'  #404454
+  local -ri 10 _line_len=$(( COLUMNS * 0.8 ))
+
+  local -r outside_line="$_outside_col${(pr:$_line_len::$_line_char:)}$reset"
+  local -r  inside_line="$_inside_col${(pr:$_line_len::$_line_char:)}$reset"
+
+  # ————————————————————————————————————————————————————————————————— #
 
   local -r command="$1"
 
@@ -63,7 +77,7 @@ wh() {
 
   # ————————————————————————————————————————————————————————————————— #
 
-  # these are in order of preference, i.e. 'bat' first, 'cat' second, etc.
+  # these are in order of preference, i.e. `bat` first, `$PAGER` second, etc.
   local -ra _visualisers=(
     'bat --language=zsh --paging=never --style=plain --color=always'
     "$PAGER"
@@ -83,16 +97,14 @@ wh() {
   if (( do_all )) dash_a='-a'
 
   which_output="$( which $dash_a -- "$command" )" || {
-    echo -E - "$0: \`$command\` not found" >&2
+    echo -E "$0: \`$command\` not found" >&2
     return 1
   }
 
-  local -a all_definitions=()
-  local -a def_type=()
-
+  local -a all_definitions def_type
   local -i 2 is_reading_func=0
-
   local line file_type func_path
+
   for line in "${(@f)which_output}"; {
 
     # Function body & end
@@ -162,7 +174,7 @@ wh() {
 
   # ——————————————————————————————————————————————————————————————————————— #
 
-  if (( draw_lines )) wh::draw_separator_line outside
+  if (( draw_lines )) echo "$outside_line"
 
   local -ri 10 definition_count=${#all_definitions}
   local -ri 10    def_count_len=${#definition_count}
@@ -176,7 +188,7 @@ wh() {
     type="$def_type[i]"
     body="$all_definitions[i]"
 
-    if (( draw_lines && i != 1 )) wh::draw_separator_line inside
+    if (( draw_lines && i != 1 )) echo "$inside_line"
 
     # Print out the subtitle, which is:
     #  - the index, right-aligned,
@@ -210,7 +222,7 @@ wh() {
     }
   }
 
-  if (( draw_lines )) wh::draw_separator_line outside
+  if (( draw_lines )) echo "$outside_line"
 
   return 0
 }
@@ -327,15 +339,6 @@ wh::builtin() {
 
 # ——————————————————————————————————————————————————————————————————————————— #
 
-wh::draw_separator_line() {
-  local -r _outside_colour=$'\e[38;5;103m'  #8087A2
-  local -r  _inside_colour=$'\e[38;5;238m'  #404454
-  local -r _reset=$'\e[m' _line_char='─'
-
-  local -r colour="_${1}_colour"
-  echo "${(P)colour}${(pr:$(( COLUMNS * .8 ))::$_line_char:)}$_reset"
-}
-
 wh::echo_coloured_path() {
   local -r   _leading_colour=$'\e[38;5;060m'    #353F5A
   local -r      _body_colour=$'\e[38;5;068m'    #6D8EC5
@@ -390,7 +393,7 @@ wh::__test__() {
 
   local input func title
   for input in "${(@)_inputs_to_test}"; {
-    title="${(r:$(( COLUMNS - $#input + 9 ))::─:)input/%/$col }"
+    title="${(r:$(( COLUMNS - $#input + 8 ))::─:)input/%/$col }"
     echo -E "$col───$rst $title $rst"
 
     # echo "${$( whence -va "$input" )/$HOME/~}"; echo
