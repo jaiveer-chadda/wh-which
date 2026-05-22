@@ -33,6 +33,7 @@ wh() {
   local -r reset=$'\e[m'
   local -r no_udln=$'\e[24m'
 
+  local -r blue_udln=$'\e[58;5;68;4m' #6D8EC5
   local -r     d_red=$'\e[38;5;131m'  #B84C50
   local -r     green=$'\e[38;5;114m'  #A6E3A1
   local -r turquoise=$'\e[38;5;116m'  #94E2D5
@@ -42,7 +43,6 @@ wh() {
   local -r      pink=$'\e[38;5;183m'  #CBA6F7
   local -r    d_grey=$'\e[38;5;238m'  #404454
   local -r    l_grey=$'\e[38;5;103m'  #8087A2
-  local -r blue_udln=$'\e[58;5;68;4m' #6D8EC5
 
   local -ri 10 line_len=$(( COLUMNS / 2 ))
 
@@ -231,11 +231,10 @@ wh::function() {
   local -r vis_command="${visualiser%% *}"
   local -ra vis_args=( "${(z)visualiser/$vis_command}" )
 
-  echo -E - "$body" | command "$vis_command" "${(@)vis_args}"
+  command "$vis_command" "${(@)vis_args}" <<< "$body"
 }
 
 wh::alias() {
-  setopt local_options rematch_pcre
   local -a match mbegin mend
   local    MATCH MBEGIN MEND
 
@@ -245,14 +244,15 @@ wh::alias() {
   #  then show that command's `wh` entry instead
   # also check that we're not in internal mode, so we don't end up recursing
   if ! (( internal_mode )) \
-    && [[ "$body" =~ '^ *(command +)?((\w|[-+.:])+) *$' ]] {
-    local -r secondary_cmd="$match[2]"
+    && [[ "$body" == ' '#(command ##|)(#b)([-_+.:0-9a-zA-Z]##)(#B)' '# ]] {
+    local -r secondary_cmd="$match[1]"
     local -r secondary_indent="$NL    $d_grey│$reset "
     in_secondary_mode=1
   }
 
   # —— Correctly Quote & Escape the Cmd Text ———————————————————————— #
 
+  # the `[3,-2]` is getting rid of the initial `$'`, and trailing `'`
   local quoted_body="${${(qqqq)body}[3,-2]}"
   local -i 2 contains_{sq,dq,sp}=0  # single quote, double quote, space
 
@@ -267,7 +267,6 @@ wh::alias() {
 
   } elif ! (( contains_sq || contains_dq || contains_sp )) {
     quote=
-
   } # else quote=$sq
 
   # ————————————————————————————————————————————————————————————————— #
@@ -288,7 +287,7 @@ wh::alias() {
 
   echo -nE "$quoted_body" \
     | command "$vis_command" "${(@)vis_args}" \
-    | sed "s/\\\'/$l_blue\\\'$green/g"
+    | command sed "s/\\\'/$l_blue\\\'$green/g"
 
   echo -n "$quote"
 
@@ -313,10 +312,7 @@ wh::builtin() {
   local -r shl_name="${${SHELL:-$BASH}/\/*\/}"
   local -r cmd_name="${body%%:*}"
 
-  local -r shl_coloured="$d_red$shl_name$reset"
-  local -r cmd_coloured="$l_blue$cmd_name$reset"
-
-  echo -nE "$cmd_coloured is a $shl_coloured ("
+  echo -nE "$l_blue$cmd_name$reset is a $d_red$shl_name$reset ("
   wh::echo_coloured_path "${SHELL:-$BASH}"
   echo ') builtin'
 }
@@ -333,22 +329,24 @@ wh::echo_coloured_path() {
 
   echo -nE "$blue_udln$d_blue$leading_segment/"
   echo -nE "$m_blue$path_body"
-  echo -nE "$no_udln/$blue_udln"
+  echo -n  "$no_udln/$blue_udln"
   echo -nE "$d_red$basename$reset"
 }
 
 wh::get_path() {
-  local -r whence_out="$( whence -va "$1" )"
+  local -r whence_out="$( whence -va -- "$1" )"
   local abs_path="${${whence_out#*is a *function from }%$NL*}"
 
   local -i 2 do_rel_path=1
-  local rel_path; rel_path="$(
-    grealpath --no-symlinks --relative-to=. -- "$abs_path"
-  )" 2>/dev/null || do_rel_path=0
+  local rel_path
+  rel_path="$( grealpath --quiet --relative-to=. -- "$abs_path" )" 2>/dev/null \
+    || do_rel_path=0
 
   abs_path="${abs_path/#$HOME/~}"
 
-  if [[ "$rel_path" != */* && "$rel_path" != ../* ]] rel_path="./$rel_path"
+  if [[ "$rel_path" != */* && "$rel_path" != ../* ]] {
+    rel_path="./$rel_path"
+  }
 
   # only display `$abs_path` if it actually has a value
   echo -nE "${abs_path:+# $abs_path$NL}"
