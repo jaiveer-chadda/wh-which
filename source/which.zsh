@@ -1,9 +1,12 @@
 #!/usr/bin/env zsh
 
-wh() {
-  setopt local_options warn_create_global warn_nested_var extended_glob
+# ── ── Main Method ── ────────────────────────────────────────────────────── #
 
+function wh () {
+  setopt local_options warn_create_global warn_nested_var extended_glob
   local -r error="$0:"
+
+  # —— Get Options —————————————————————————————————————————————————— #
 
   local -i 2 internal_mode=0 do_lines=1 do_all=1
 
@@ -16,7 +19,7 @@ wh() {
       ( * )        return 1 ;;
     }
   }
-  shift $(( OPTIND - 1 ))
+  shift OPTIND-1
 
   if ! (( $# )) {
     echo "$error must enter a command" >&2
@@ -25,7 +28,7 @@ wh() {
 
   if (( internal_mode )) do_lines=0 do_all=0
 
-  # ————————————————————————————————————————————————————————————————— #
+  # —— Set Constants ———————————————————————————————————————————————— #
 
   local -r NL=$'\n'
   local -r sq=\' dq=\"
@@ -49,7 +52,7 @@ wh() {
   local -r outside_line="$l_grey${(r:$line_len::─:)}$reset"
   local -r  inside_line="$d_grey${(r:$line_len::─:)}$reset"
 
-  # ————————————————————————————————————————————————————————————————— #
+  # —— Setup Match Patterns ————————————————————————————————————————— #
 
   local -r command="$1"
 
@@ -66,7 +69,7 @@ wh() {
   local -r   bash_exe_prefix='Bourne-Again shell script'
   local -r        ascii_text='ASCII text'
 
-  # ————————————————————————————————————————————————————————————————— #
+  # —— Define Types ————————————————————————————————————————————————— #
 
   local -rA types=(
         [alias]='1 0 alias'
@@ -86,7 +89,7 @@ wh() {
   local -i 10 max_type_len=-1; local t
   for t ("${(@k)types}") if (( $#t > max_type_len )) max_type_len=${#t}
 
-  # ————————————————————————————————————————————————————————————————— #
+  # —— Define Visualiser ———————————————————————————————————————————— #
 
   # these are in order of preference, i.e. `bat` first, `$PAGER` second, etc.
   local -ra _visualisers=(
@@ -104,6 +107,8 @@ wh() {
     # if they all fail, then `$visualiser` will be unset (set to '')
   }
 
+  # —— Get Raw `which` Input ———————————————————————————————————————— #
+
   local which_output dash_a=
   if (( do_all )) dash_a='-a'
 
@@ -111,6 +116,8 @@ wh() {
     echo -E "$error \`$command\` not found" >&2
     return 1
   }
+
+  # —— Parse Input —————————————————————————————————————————————————— #
 
   local -a all_definitions def_type
   local -i 2 is_reading_func=0
@@ -136,7 +143,7 @@ wh() {
 
     case "$line" {
 
-      # function
+      # ~~ function ~~
       ( "$function_start" )
         is_reading_func=1
         def_type+=function
@@ -145,19 +152,19 @@ wh() {
         all_definitions+="${func_path:+$func_path$NL}function $line"
       ;;
 
-      # alias
+      # ~~ alias ~~
       ( "$alias_prefix"* )
         def_type+=alias
         all_definitions+="${line#$alias_prefix}"
       ;;
 
-      # builtin
+      # ~~ builtin ~~
       ( "$builtin_line" )
         def_type+=builtin
         all_definitions+="$line"
       ;;
 
-      # posix_exe, mach_o_bin, bash_exe, zsh_exe, general_exe, other_exe
+      # ~~ executable ~~
       ( "$file_prefix"* )
         all_definitions+="$line"
         file_type="$( file --brief "$line" )"
@@ -173,14 +180,14 @@ wh() {
         }
       ;;
 
-      ( * ) # unknown
+      ( * ) # ~~ unknown ~~
         def_type+=unknown
         all_definitions+="$line"
       ;;
     }
   }
 
-  # ——————————————————————————————————————————————————————————————————————— #
+  # —— Format & Print Data ———————————————————————————————————————————————— #
 
   local -ri 10 def_count=${#all_definitions}
 
@@ -223,9 +230,12 @@ wh() {
 }
 
 # ——————————————————————————————————————————————————————————————————————————— #
+# ──────────────────────────── ──────o────── ──────────────────────────────── #
 # ——————————————————————————————————————————————————————————————————————————— #
 
-wh::function() {
+# ── ── function() ── ─────────────────────────────────────────────────────── #
+
+function wh::function() {
   # greedily capture everything ( `%%` ),
   #  from the first space until the end of the string ( `%` )
   local -r vis_command="${visualiser%% *}"
@@ -234,7 +244,9 @@ wh::function() {
   command "$vis_command" "${(@)vis_args}" <<< "$body"
 }
 
-wh::alias() {
+# ── ── alias() ── ────────────────────────────────────────────────────────── #
+
+function wh::alias() {
   local -a match mbegin mend
   local    MATCH MBEGIN MEND
 
@@ -250,7 +262,7 @@ wh::alias() {
     in_secondary_mode=1
   }
 
-  # —— Correctly Quote & Escape the Cmd Text ———————————————————————— #
+  # —— Quote & Esc Text ————————————————————————————————————————————— #
 
   # the `[3,-2]` is getting rid of the initial `$'`, and trailing `'`
   local quoted_body="${${(qqqq)body}[3,-2]}"
@@ -309,7 +321,9 @@ wh::alias() {
   echo -E "$secondary_indent${(pj:$secondary_indent:)sub_cmd_body}"
 }
 
-wh::builtin() {
+# ── ── builtin() ── ──────────────────────────────────────────────────────── #
+
+function wh::builtin() {
   # get the last part of the path of whichever shell they're using
   local -r shl_name="${${SHELL:-$BASH}/\/*\/}"
   local -r cmd_name="${body%%:*}"
@@ -320,9 +334,12 @@ wh::builtin() {
 }
 
 # ——————————————————————————————————————————————————————————————————————————— #
+# ──────────────────────────── ──────o────── ──────────────────────────────── #
 # ——————————————————————————————————————————————————————————————————————————— #
 
-wh::echo_coloured_path() {
+# ── ── echo_coloured_path() ── ───────────────────────────────────────────── #
+
+function wh::echo_coloured_path() {
   local -r path_="${1/$HOME/~}"
 
   local -r path_body="${${path_#*\/}%\/*}"
@@ -335,7 +352,9 @@ wh::echo_coloured_path() {
   echo -nE "$d_red$basename$reset"
 }
 
-wh::get_path() {
+# ── ── get_path() ── ─────────────────────────────────────────────────────── #
+
+function wh::get_path() {
   local -r whence_out="$( whence -va -- "$1" )"
   local abs_path="${${whence_out#*is a *function from }%$NL*}"
 
@@ -360,9 +379,9 @@ wh::get_path() {
 }
 
 # ——————————————————————————————————————————————————————————————————————————— #
-# ——————————————————————————————————————————————————————————————————————————— #
+# ── ── __test__() ── ─────────────────────────────────────────────────────── #
 
-wh::__test__() {
+function wh::__test__() {
   local -r col=$'\e[38;5;105m'
   local -r rst=$'\e[m'
 
