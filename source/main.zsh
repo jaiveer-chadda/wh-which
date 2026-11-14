@@ -17,6 +17,9 @@ zmodload zsh/parameter
 function whh () {
 
   setopt local_options warn_create_global typeset_silent
+  setopt extended_glob
+
+  local -a match mbegin mend
 
   # ———————————————————————————————————————————————————————————————————— #
 
@@ -35,26 +38,46 @@ function whh () {
 
   # ———————————————————————————————————————————————————————————————————— #
 
+  local -i 2 mark_alias_r=1
+
   local -i 2 do_colour=1
-  if [[ ! -t 1 || -v NO_COLOR ]] do_colour=0
+  local colour_arg='always'
+
+  if [[ ! -t 1 || -z NO_COLOR ]] do_colour=0 colour_arg='never'
 
   # ———————————————————————————————————————————————— #
 
-  local RESET DIM NODIM RED {BUILTIN,COMMAND,RESWORD}_CLR
+  local RESET DIM NODIM RED ORA YEL GRN CYN
+  local {BUILTIN,OPTIONS,COMMAND,RESWORD}_CLR
 
   if (( do_colour )) {
     RESET=$'\e[m' DIM=$'\e[2m' NODIM=$'\e[22m'
     RED=$'\e[31m'
+    ORA=$'\e[38;5;216m'
+    YEL=$'\e[93m'
+    GRN=$'\e[92m'
+    CYN=$'\e[96m'
 
     RESWORD_CLR=$'\e[95m'
+    OPTIONS_CLR=$'\e[38;5;170m'
     BUILTIN_CLR=$'\e[91m'
     COMMAND_CLR=$'\e[94m'
   }
 
+  local -r SP=' ' SQ=\' DQ=\"
+  local -r PRECMD_PAT='(-|builtin|command|exec|nocorrect|noglob)'
+
+  local -r SGL_QU="$DIM$GRN'$RESET"
+  local -r DBL_QU="$DIM$GRN\"$RESET"
+  local -r DLR_QU="$DIM$GRN\$'$RESET"
+
   local -r DISABLED_MSG="$RED${DIM}[$NODIM disabled $DIM]$RESET"
 
-  local -r     line="$DIM${(r:COLUMNS  ::─:)}$RESET"
-  local -r halfline="$DIM${(r:COLUMNS/2::─:)}$RESET"
+  local -r   LOADED_MSG="$GRN$DIM(${NODIM}""loaded$DIM)$RESET"
+  local -r UNLOADED_MSG="$YEL$DIM(${NODIM}unloaded$DIM)$RESET"
+
+  local -r     LINE="$DIM${(r:COLUMNS  ::─:)}$RESET"
+  local -r HALFLINE="$DIM${(r:COLUMNS/2::─:)}$RESET"
 
   # ———————————————————————————————————————————————————————————————————— #
 
@@ -82,7 +105,7 @@ function whh::process_input () { # <- whh
 
   # ———————————————————————————————————————————————— #
 
-  output_lines+="$line"  # add an initial dividing line
+  output_lines+="$HALFLINE"  # add an initial dividing line
 
   # ———————————————————————————————————————————————— #
 
@@ -112,7 +135,7 @@ function whh::process_input () { # <- whh
     # ——————————————————————————————————— #
 
     "$type_func"  # run the function associated with this type
-    output_lines+="$line"  # add a dividing line
+    output_lines+="$HALFLINE"  # add a dividing line
   }
 
   # ———————————————————————————————————————————————— #
@@ -140,15 +163,52 @@ function whh::find_types () { # <- whh::process_input <- whh
 # —— whh::aliases ——————————————————————————————————————————————————————————— #
 
 function whh::aliases () { # <- whh::process_input <- whh
+  local -r alias_type="${${type#dis_}[1]}"
+  local -r alias_body="${${(P)type}[$input]}"
+
+  # ———————————————————————————————————————————————— #
+
+  # TODO: improve - it isn't great, but it'll do for now
+  local quote
+  if   [[ $alias_body == *$SQ* ]] { quote="$DBL_QU" } \
+  elif [[ $alias_body == *$DQ* ]] { quote="$SGL_QU" } \
+  elif [[ $alias_body == *$SP* ]] { quote="$SGL_QU" } \
+  else                            { quote=          }
+
+  # ———————————————————————————————————————————————— #
+
+  # TODO: implement
+  local -i 2 is_simple=0
+
+  if [[ "$alias_body" ==
+    [[:space:]]#(${~PRECMD_PAT}[[:space:]]##|)(#b)([[:IDENT:]]##)[[:space:]]#
+  ]] is_simple=1
+
+  # ———————————————————————————————————————————————————————————————————— #
+
+  local line="${RESWORD_CLR}alias "
+
+  if [[ $alias_type == [gs] ]] { line+="$OPTIONS_CLR-$alias_type " } \
+  elif (( mark_alias_r ))      { line+="$OPTIONS_CLR-r "           }
+
+  line+="$COMMAND_CLR$input$CYN="
+
+  # ———————————————————————————————————————————————— #
+
+  line+="$quote$(
+    bat --style=plain --paging=never --language=zsh --color=$colour_arg \
+      <<< "$alias_body"
+  )$quote"
+
+  # ———————————————————————————————————————————————————————————————————— #
+
+  output_lines+="$line $disabled_msg"
 }
 
 # —— whh::reswords —————————————————————————————————————————————————————————— #
 
 function whh::reswords () { # <- whh::process_input <- whh
-  local subtitle='shell reserved word'
-  if (( is_disabled )) subtitle+=" $DISABLED_MSG"
-
-  output_lines+="$RESWORD_CLR$input$RESET : $subtitle"
+  output_lines+="$RESWORD_CLR$input$RESET : shell reserved word $disabled_msg"
 }
 
 # —— whh::functions ————————————————————————————————————————————————————————— #
@@ -159,6 +219,12 @@ function whh::functions () { # <- whh::process_input <- whh
 # —— whh::builtins —————————————————————————————————————————————————————————— #
 
 function whh::builtins () { # <- whh::process_input <- whh
+  local -r line="$BUILTIN_CLR$input$RESET : shell builtin"
+
+  local load_msg="$LOADED_MSG"
+  if [[ "${${(P)type}[$input]}" == 'undefined' ]] load_msg="$UNLOADED_MSG"
+
+  output_lines+="$line $load_msg $disabled_msg"
 }
 
 # —— whh::commands —————————————————————————————————————————————————————————— #
