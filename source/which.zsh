@@ -11,7 +11,7 @@ function wh () {
   local -i 2 internal_mode=0 do_lines=1 do_all=1
 
   local opt OPTIND OPTARG
-  while { getopts 'xlA' opt; } { #
+  while { getopts 'xlA' opt; } {
     case "$opt" {
       ( x ) internal_mode=1 ;;
       ( l )      do_lines=0 ;;
@@ -56,8 +56,9 @@ function wh () {
 
   local -r command="$1"
 
-  local -r alias_prefix="$command: aliased to "
-  local -r builtin_line="$command: shell built-in command"
+  local -r  alias_prefix="$command: aliased to "
+  local -r  builtin_line="$command: shell built-in command"
+  local -r reserved_line="$command: shell reserved word"
   local -r file_prefix='/'
 
   local -r function_start="$command () {"
@@ -83,6 +84,7 @@ function wh () {
      [bash_exe]='0 1 GNU Bash executable'
       [zsh_exe]='0 1 Z shell executable'
 
+     [reserved]='0 0 reserved word'
       [unknown]='0 0 unknown type'
   )
 
@@ -116,6 +118,8 @@ function wh () {
     echo -E "$error \`$command\` not found" >&2
     return 1
   }
+
+  if [[ '' ]] echo something
 
   # —— Parse Input —————————————————————————————————————————————————— #
 
@@ -164,6 +168,12 @@ function wh () {
         all_definitions+="$line"
       ;;
 
+      # ~~ reserved word ~~
+      ( "$reserved_line" )
+        def_type+=reserved
+        all_definitions+="$line"
+      ;;
+
       # ~~ executable ~~
       ( "$file_prefix"* )
         all_definitions+="$line"
@@ -171,16 +181,16 @@ function wh () {
 
         # only get the first line of the output
         case "${file_type%%$NL*}" {
-         (  "$posix_exe_prefix"*             ) def_type+=posix_exe   ;;
-         (  "$mach_o_bin_prefix"*            ) def_type+=mach_o_bin  ;;
-         (  "$bash_exe_prefix"*"$ascii_text" ) def_type+=bash_exe    ;;
-         ( *"$zsh_exe_infix"*"$ascii_text"   ) def_type+=zsh_exe     ;;
-         (  "$ascii_text"                    ) def_type+=general_exe ;;
-         ( *                                 ) def_type+=other_exe   ;;
+          (  "$posix_exe_prefix"*             ) def_type+=posix_exe   ;;
+          (  "$mach_o_bin_prefix"*            ) def_type+=mach_o_bin  ;;
+          (  "$bash_exe_prefix"*"$ascii_text" ) def_type+=bash_exe    ;;
+          ( *"$zsh_exe_infix"*"$ascii_text"   ) def_type+=zsh_exe     ;;
+          (  "$ascii_text"                    ) def_type+=general_exe ;;
+          ( *                                 ) def_type+=other_exe   ;;
         }
       ;;
 
-      ( * ) # ~~ unknown ~~
+      ( * ) : # ~~ unknown ~~
         def_type+=unknown
         all_definitions+="$line"
       ;;
@@ -256,7 +266,7 @@ function wh::alias() {
   #  then show that command's `wh` entry instead
   # also check that we're not in internal mode, so we don't end up recursing
   if ! (( internal_mode )) \
-    && [[ "$body" == ' '#(command ##|)(#b)([-_+.:0-9a-zA-Z]##)(#B)' '# ]] {
+    && [[ "$body" == ' '#(command[ ]##|)(#b)([-_+.:0-9a-zA-Z]##)(#B)' '# ]] {
     local -r secondary_cmd="$match[1]"
     local -r secondary_indent="$NL    $d_grey│$reset "
     in_secondary_mode=1
