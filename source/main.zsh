@@ -16,9 +16,9 @@ zmodload zsh/parameter
 
 function whh () {
 
-  setopt local_options warn_create_global
+  setopt local_options warn_create_global typeset_silent
 
-  # ———————————————————————————————————————————————— #
+  # ———————————————————————————————————————————————————————————————————— #
 
   local -r ROOT_FUNCNAME="${(%):-%N}"
 
@@ -27,28 +27,46 @@ function whh () {
     galiases    dis_galiases
     saliases    dis_saliases
 
-    reswords    dis_reswords
+    reswords    dis_reswords    # arrays
     functions   dis_functions   # functions_source  dis_functions_source
     builtins    dis_builtins
     commands  # todo: add a contingency for unix's case-insensitive behaviour
   )
 
-  # ———————————————————————————————————————————————— #
-
-  local -ra inputs=( "$@" )
-  if ! (( $#inputs )) whh::error no-input && return 1
-
-  # ———————————————————————————————————————————————— #
+  # ———————————————————————————————————————————————————————————————————— #
 
   local -i 2 do_colour=1
   if [[ ! -t 1 || -v NO_COLOR ]] do_colour=0
 
   # ———————————————————————————————————————————————— #
 
+  local RESET DIM NODIM RED {BUILTIN,COMMAND,RESWORD}_CLR
+
+  if (( do_colour )) {
+    RESET=$'\e[m' DIM=$'\e[2m' NODIM=$'\e[22m'
+    RED=$'\e[31m'
+
+    RESWORD_CLR=$'\e[95m'
+    BUILTIN_CLR=$'\e[91m'
+    COMMAND_CLR=$'\e[94m'
+  }
+
+  local -r DISABLED_MSG="$RED${DIM}[$NODIM disabled $DIM]$RESET"
+
+  local -r     line="$DIM${(r:COLUMNS  ::─:)}$RESET"
+  local -r halfline="$DIM${(r:COLUMNS/2::─:)}$RESET"
+
+  # ———————————————————————————————————————————————————————————————————— #
+
+  local -ra inputs=( "$@" )
+  if ! (( $#inputs )) whh::error no-input && return 1
+
+  # ———————————————————————————————————————————————— #
+
   local input= output=
   for input in "${(@)inputs}"; whh::process_input
 
-  # ———————————————————————————————————————————————— #
+  # ———————————————————————————————————————————————————————————————————— #
 
   if [[ -n "$output" ]] echo -E - "$output"
 }
@@ -64,11 +82,23 @@ function whh::process_input () { # <- whh
 
   # ———————————————————————————————————————————————— #
 
-  local type type_func
-  for type in "${(@)types}"; {
+  output_lines+="$line"  # add an initial dividing line
 
-    # remove the `dis_` from the start of `$type`
-    type_func="${type#dis_}"
+  # ———————————————————————————————————————————————— #
+
+  local -i 2 is_disabled=0
+  local type type_func disabled_msg
+
+  for type in "${(@)types}"; {
+    is_disabled=0 disabled_msg=
+    type_func="$type"
+
+    if [[ $type == dis_* ]] {
+      is_disabled=1 disabled_msg="$DISABLED_MSG"  # mark the input as disabled
+      # remove the `dis_` from the start of `$type`
+      type_func="${type_func#dis_}"
+    }
+
     # all alias types will share the same function
     if [[ $type_func == [gs]aliases ]] type_func="${type_func#?}"
 
@@ -79,7 +109,10 @@ function whh::process_input () { # <- whh
     #  this should basically never run, but it's here as a backup
     if ! [[ $functions[(Ie)$type_func] ]] whh::error type-err && continue
 
+    # ——————————————————————————————————— #
+
     "$type_func"  # run the function associated with this type
+    output_lines+="$line"  # add a dividing line
   }
 
   # ———————————————————————————————————————————————— #
@@ -112,6 +145,10 @@ function whh::aliases () { # <- whh::process_input <- whh
 # —— whh::reswords —————————————————————————————————————————————————————————— #
 
 function whh::reswords () { # <- whh::process_input <- whh
+  local subtitle='shell reserved word'
+  if (( is_disabled )) subtitle+=" $DISABLED_MSG"
+
+  output_lines+="$RESWORD_CLR$input$RESET : $subtitle"
 }
 
 # —— whh::functions ————————————————————————————————————————————————————————— #
@@ -141,7 +178,7 @@ function whh::error () { # <- ... <- whh
     ( *         ) err='unknown error'                   ;;
   }
 
-  echo -E - $'\e[31m'"$ROOT_FUNCNAME"$'\e[m'": $err"
+  echo -E - "$RED$ROOT_FUNCNAME$RESET: $err"
 
   return 0  # this function should always return success
 } >&2  # everything this function outputs should go to `stderr`
@@ -150,3 +187,4 @@ function whh::error () { # <- ... <- whh
 # ——————————————————————————————————————————————————————————————————————————— #
 
 # spell:ignoreRegexp /[gs]aliases\b/g
+# spell:ignore nodim
