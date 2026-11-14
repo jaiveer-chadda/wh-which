@@ -36,23 +36,35 @@ function whh () {
   # ———————————————————————————————————————————————— #
 
   local -ra inputs=( "$@" )
+  if ! (( $#inputs )) whh::error no-input && return 1
 
-  local input
+  local input= output=
   for input in "${(@)inputs}"; whh::process_input
+
+  # ———————————————————————————————————————————————— #
+
+  echo -E - "$output"
 }
 
 # ——————————————————————————————————————————————————————————————————————————— #
 # —— whh::process_input () —————————————————————————————————————————————————— #
 
 function whh::process_input () { # <- whh
-  local -a types=()
+  local -a types=() output_lines=()
   whh::find_types
 
   if ! (( $#types )) whh::error not-found && return  # move on to next input
 
-  print -l $types
+  # ———————————————————————————————————————————————— #
+
+  ;: DEBUG :; output_lines+=( $types )
+
+  # ———————————————————————————————————————————————— #
+
+  output+="${(F)output_lines}"
 }
 
+# ——————————————————————————————————————————————————————————————————————————— #
 # —— whh::find_types () ————————————————————————————————————————————————————— #
 
 function whh::find_types () { # <- whh::process_input <- whh
@@ -77,11 +89,13 @@ function whh::error () { # <- ... <- whh
   echo -nE - $'\e[31m'"$ROOT_FUNCNAME"$'\e[m: '
 
   case "$error" {
-    ( no-input  ) echo -E - "\`$input\` not found" ;;
-    ( not-found ) echo -E - "\`$input\` not found" ;;
-    ( *         ) echo -E - "unknown error"        ;;
+    ( no-input  ) echo -E - 'must provide an input' ;;
+    ( not-found ) echo -E - "\`$input\` not found"  ;;
+    ( *         ) echo -E - 'unknown error'         ;;
   }
 
+  # this function should always return success
+  return 0
 } >&2
 
 # ——————————————————————————————————————————————————————————————————————————— #
