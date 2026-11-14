@@ -8,7 +8,7 @@ zmodload zsh/parameter
 #    alias, builtin, command, function, hashed, reserved or
 #    none, according as name corresponds to an alias, a
 #    built-in command, an external command, a shell function,
-#    a command defined with the hash builtin, a reserved word,
+#    a ```command defined with the hash builtin```, a reserved word,
 #    or is not recognised.
 
 # ——————————————————————————————————————————————————————————————————————————— #
@@ -30,7 +30,7 @@ function whh () {
     reswords    dis_reswords
     functions   dis_functions   # functions_source  dis_functions_source
     builtins    dis_builtins
-    commands
+    commands  # todo: add a contingency for unix's case-insensitive behaviour
   )
 
   # ———————————————————————————————————————————————— #
@@ -38,12 +38,19 @@ function whh () {
   local -ra inputs=( "$@" )
   if ! (( $#inputs )) whh::error no-input && return 1
 
+  # ———————————————————————————————————————————————— #
+
+  local -i 2 do_colour=1
+  if [[ ! -t 1 || -v NO_COLOR ]] do_colour=0
+
+  # ———————————————————————————————————————————————— #
+
   local input= output=
   for input in "${(@)inputs}"; whh::process_input
 
   # ———————————————————————————————————————————————— #
 
-  echo -E - "$output"
+  if [[ -n "$output" ]] echo -E - "$output"
 }
 
 # ——————————————————————————————————————————————————————————————————————————— #
@@ -57,14 +64,29 @@ function whh::process_input () { # <- whh
 
   # ———————————————————————————————————————————————— #
 
-  ;: DEBUG :; output_lines+=( $types )
+  local type type_func
+  for type in "${(@)types}"; {
+
+    # remove the `dis_` from the start of `$type`
+    type_func="${type#dis_}"
+    # all alias types will share the same function
+    if [[ $type_func == [gs]aliases ]] type_func="${type_func#?}"
+
+    # prepend the namespace prefix to the type_func
+    type_func="whh::$type_func"
+
+    # if `whh::$type_func` isn't a function, then something's gone wrong
+    #  this should basically never run, but it's here as a backup
+    if ! [[ $functions[(Ie)$type_func] ]] whh::error type-err && continue
+
+    "$type_func"  # run the function associated with this type
+  }
 
   # ———————————————————————————————————————————————— #
 
   output+="${(F)output_lines}"
 }
 
-# ——————————————————————————————————————————————————————————————————————————— #
 # —— whh::find_types () ————————————————————————————————————————————————————— #
 
 function whh::find_types () { # <- whh::process_input <- whh
@@ -82,20 +104,49 @@ function whh::find_types () { # <- whh::process_input <- whh
 }
 
 # ——————————————————————————————————————————————————————————————————————————— #
+# —— whh::aliases ——————————————————————————————————————————————————————————— #
+
+function whh::aliases () { # <- whh::process_input <- whh
+}
+
+# —— whh::reswords —————————————————————————————————————————————————————————— #
+
+function whh::reswords () { # <- whh::process_input <- whh
+}
+
+# —— whh::functions ————————————————————————————————————————————————————————— #
+
+function whh::functions () { # <- whh::process_input <- whh
+}
+
+# —— whh::builtins —————————————————————————————————————————————————————————— #
+
+function whh::builtins () { # <- whh::process_input <- whh
+}
+
+# —— whh::commands —————————————————————————————————————————————————————————— #
+
+function whh::commands () { # <- whh::process_input <- whh
+}
+
+# ——————————————————————————————————————————————————————————————————————————— #
 # —— whh::error () —————————————————————————————————————————————————————————— #
 
 function whh::error () { # <- ... <- whh
-  local error="$1"
-  echo -nE - $'\e[31m'"$ROOT_FUNCNAME"$'\e[m: '
-
-  case "$error" {
-    ( no-input  ) echo -E - 'must provide an input' ;;
-    ( not-found ) echo -E - "\`$input\` not found"  ;;
-    ( *         ) echo -E - 'unknown error'         ;;
+  local err=
+  case "$1" {
+    ( no-input  ) err='must provide an input'           ;;
+    ( not-found ) err="\`$input\` not found"            ;;
+    ( type-err  ) err="unknown type \`${type/%(e|)s}\`" ;;
+    ( *         ) err='unknown error'                   ;;
   }
 
-  # this function should always return success
-  return 0
-} >&2
+  echo -E - $'\e[31m'"$ROOT_FUNCNAME"$'\e[m'": $err"
+
+  return 0  # this function should always return success
+} >&2  # everything this function outputs should go to `stderr`
 
 # ——————————————————————————————————————————————————————————————————————————— #
+# ——————————————————————————————————————————————————————————————————————————— #
+
+# spell:ignoreRegexp /[gs]aliases\b/g
