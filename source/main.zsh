@@ -19,6 +19,8 @@ function whh () {
   setopt local_options warn_create_global typeset_silent
   setopt extended_glob
 
+  local MATCH
+  local -i 10 MBEGIN MEND
   local -a match mbegin mend
 
   # ———————————————————————————————————————————————————————————————————— #
@@ -39,6 +41,8 @@ function whh () {
   # ———————————————————————————————————————————————————————————————————— #
 
   local -i 2 mark_alias_r=1
+  local -i 2 do_double_dash=1
+  local -i 2 do_posix_for_if=1
 
   local -i 2 do_colour=1
   local colour_arg='always'
@@ -48,7 +52,7 @@ function whh () {
   # ———————————————————————————————————————————————— #
 
   local RESET DIM NODIM RED ORA YEL GRN CYN
-  local {BUILTIN,OPTIONS,COMMAND,RESWORD}_CLR
+  local {BUILTIN,OPTIONS,COMMAND,RESWORD,COMMENT,COMHASH}_CLR
 
   if (( do_colour )) {
     RESET=$'\e[m' DIM=$'\e[2m' NODIM=$'\e[22m'
@@ -62,16 +66,19 @@ function whh () {
     OPTIONS_CLR=$'\e[38;5;170m'
     BUILTIN_CLR=$'\e[91m'
     COMMAND_CLR=$'\e[94m'
-  }
 
-  local -r SP=' ' SQ=\' DQ=\"
-  local -r PRECMD_PAT='(-|builtin|command|exec|nocorrect|noglob)'
+    COMMENT_CLR=$'\e[38;5;103m'
+    COMHASH_CLR=$'\e[38;5;240m'
+  }
 
   local -r SGL_QU="$DIM$GRN'$RESET"
   local -r DBL_QU="$DIM$GRN\"$RESET"
   local -r DLR_QU="$DIM$GRN\$'$RESET"
 
+  local -r COMMENT="$COMHASH_CLR#$COMMENT_CLR"
+
   local -r DISABLED_MSG="$RED${DIM}[$NODIM disabled $DIM]$RESET"
+  local -r DISB_COMMENT="$COMHASH_CLR# $DISABLED_MSG"
 
   local -r   LOADED_MSG="$GRN$DIM(${NODIM}""loaded$DIM)$RESET"
   local -r UNLOADED_MSG="$YEL$DIM(${NODIM}unloaded$DIM)$RESET"
@@ -79,6 +86,19 @@ function whh () {
   local -r     LINE="$DIM${(r:COLUMNS  ::─:)}$RESET"
   local -r HALFLINE="$DIM${(r:COLUMNS/2::─:)}$RESET"
 
+  # ———————————————————————————————————————————————— #
+
+  local -r SP=' ' SQ=\' DQ=\"
+  local -r NL=$'\n' HT=$'\t'
+  local -r PRECMD='(-|builtin|command|exec|nocorrect|noglob)'
+
+  local -ri 10 TABSIZE=4
+
+  local -ra COLOUR_PAGER=(
+    bat --style=plain --paging=never --language=zsh --color="$colour_arg"
+  )
+
+  # ———————————————————————————————————————————————————————————————————— #
   # ———————————————————————————————————————————————————————————————————— #
 
   local -ra inputs=( "$@" )
@@ -180,24 +200,29 @@ function whh::aliases () { # <- whh::process_input <- whh
   # TODO: implement
   local -i 2 is_simple=0
 
-  if [[ "$alias_body" ==
-    [[:space:]]#(${~PRECMD_PAT}[[:space:]]##|)(#b)([[:IDENT:]]##)[[:space:]]#
+  if [[ $alias_body ==
+    [[:space:]]#(${~PRECMD}[[:space:]]##|)(#b)((=|)[[:IDENT:]]##)[[:space:]]#
+    && ${match[1]#=} != $input
   ]] is_simple=1
 
   # ———————————————————————————————————————————————————————————————————— #
 
   local line="${RESWORD_CLR}alias "
+  local opts_str=
 
-  if [[ $alias_type == [gs] ]] { line+="$OPTIONS_CLR-$alias_type " } \
-  elif (( mark_alias_r ))      { line+="$OPTIONS_CLR-r "           }
+  if [[ $alias_type == [gs] ]] { opts_str+="-$alias_type " } \
+  elif (( mark_alias_r ))      { opts_str+="-r "           }
+
+  if [[ $do_double_dash -ne 0 && $input[1] == '-' ]] line+="$OPTIONS_CLR-- "
+
+  if [[ -n $opts_str ]] line+="$OPTIONS_CLR$opts_str"
 
   line+="$COMMAND_CLR$input$CYN="
 
   # ———————————————————————————————————————————————— #
 
   line+="$quote$(
-    bat --style=plain --paging=never --language=zsh --color=$colour_arg \
-      <<< "$alias_body"
+    "${(@z)COLOUR_PAGER}" <<< "$alias_body"
   )$quote"
 
   # ———————————————————————————————————————————————————————————————————— #
@@ -214,6 +239,81 @@ function whh::reswords () { # <- whh::process_input <- whh
 # —— whh::functions ————————————————————————————————————————————————————————— #
 
 function whh::functions () { # <- whh::process_input <- whh
+  local -a func_lines=( "${(@f)${(P)type}[$input]}" )
+
+  # ———————————————————————————————————————————————— #
+
+  local redirect=
+
+  if [[ $func_lines[+1] == '{' && $func_lines[-1] == '}'* ]] {
+    redirect="${func_lines[-1]#\} }"
+    shift    func_lines
+    shift -p func_lines
+  }
+
+  # ———————————————————————————————————————————————— #
+
+  func_lines=(
+    "${(@)func_lines/#(#m)$HT#/${(r.( $#MATCH ? $#MATCH : 1 ) * TABSIZE.)}}"
+  )
+
+  # ———————————————————————————————————————————————— #
+
+  local body="${(F)func_lines}"
+
+  if (( do_posix_for_if )) {
+    body="${body//$NL$SP#(#b)(then|do)$NL/; $match[1]$NL}"
+  } else {
+    body="${body//$NL$SP#then$NL/ {$NL}"
+    body="${body//$NL$SP#do$NL/; {$NL}"
+
+    body="${body//$NL(#b)($SP#)(fi|done)($NL|(#e))/$NL$match[1]\}$NL}"
+    body="${body//$NL(#b)($SP#)elif/$NL$match[1]\} elif}"
+    body="${body//$NL(#b)($SP#)else/$NL$match[1]\} else {}"
+  }
+
+  # ———————————————————————————————————————————————— #
+
+  local func_source="${${(P)${type/%/_source}}[$input]}"
+
+  # if `func_source` is empty, it's likely an autoloaded function
+  if [[ -z $func_source ]] {
+    local _path # go fish !!
+    for _path in "${(@)fpath}"; {
+      if [[ -f "$_path/$input" ]] {
+        func_source="$_path/$input"
+        break  # stop searching at the first match
+      }
+    }
+    # if we _still_ couldn't find anything, just use an appropriate default
+    if [[ -z $func_source ]] func_source='autoload shell function'
+  }
+
+  # ———————————————————————————————————————————————————————————————————— #
+
+  local line="${RESWORD_CLR}function "
+  local opts_str=
+
+  if [[ "$( typeset -f -- "$input" )" ==
+    [^$NL]##${NL}[[:space:]]#'# traced'$NL*
+  ]] opts_str+='-T '
+
+  if [[ $do_double_dash -ne 0 && $input[1] == '-' ]] opts_str+='-- '
+
+  if [[ -n $opts_str ]] line+="$OPTIONS_CLR$opts_str"
+
+  # ———————————————————————————————————————————————— #
+
+  line+="$COMMAND_CLR$input$RED () {"
+  if (( is_disabled )) line+="  $DISB_COMMENT"
+
+  line+="$RESET$NL$( "${(@z)COLOUR_PAGER}" <<< "$body" )$NL"
+  line+="$RED}$RESET"
+
+  if [[ -n $redirect ]] line+=" $( "${(@z)COLOUR_PAGER}" <<< "$redirect" )"
+
+  output_lines+="$COMMENT ${func_source/#$HOME/~}$RESET"
+  output_lines+="$line"
 }
 
 # —— whh::builtins —————————————————————————————————————————————————————————— #
@@ -253,4 +353,4 @@ function whh::error () { # <- ... <- whh
 # ——————————————————————————————————————————————————————————————————————————— #
 
 # spell:ignoreRegexp /[gs]aliases\b/g
-# spell:ignore nodim
+# spell:ignore nodim disb
