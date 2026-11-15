@@ -169,9 +169,17 @@ function whh::find_types () { # <- whh::process_input <- whh
   # check if the input is each of the the associative/regular arrays
   #  - for assoc   arrays, we need to check that the match's strlen isn't 0
   #  - for regular arrays, we need to check that the match's index  isn't 0
-  local type
+  local type dir
   for type in "${(@)SEARCH_ORDER}"; {
-    if [[ ${(Pt)type} == *association* ]] {
+    if [[ $type == 'commands' ]] {
+      # for commands, we can't just check the assoc, because it doesn't work
+      #  case-insensitively - e.g. if `$input = LS`, we need to match `/bin/ls`
+      # therefore, we have to manually go through every path in `$path`,
+      #  and check whether a path to the executable exists
+      for dir in "${(@)path}"; { # stop searching after the first match
+        if [[ -e $dir/$input ]] { types+="$type"; break 1; }
+      }
+    } elif [[ ${(Pt)type} == *association* ]] {
       if [[ ${${(P)type}[(Ie)$input]} ]] types+="$type"
     } else {
       if (( ${${(P)type}[(Ie)$input]} )) types+="$type"
