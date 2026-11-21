@@ -29,20 +29,125 @@ function whh () {
 
   # —— user options ———————————————————————————————————————————————————— #
 
-  # TODO: implement a `getopts` loop to set these values
   local -i 10 TABSIZE=4
 
   local -i 2 find_all=1
-  local -i 2 path_only=0
+  local -i 2 cmd_only=0
   local -i 2 mark_alias_r=1
   local -i 2 do_double_dash=1
   local -i 2 do_posix_for_if=1
   local -i 2 resolve_cmd_case=1
 
   local -i 2 do_colour=1
+
+  local u_colour='auto'
+  local u_tabsize
+
   local colour_arg='always'
 
   if [[ ! -t 1 || -z NO_COLOR ]] do_colour=0 colour_arg='never'
+
+  # ———————————————————————————————————————————————— #
+
+  local opt optarg
+  local -a  opts
+
+  while (( $# )) {
+
+    # ———————————————————————————————————————————————— #
+
+    optarg="$2"
+
+    case "$1" {
+      ( --* ) opts=( "$1" ) ;;
+
+      ( [-+]* ) {
+        opts=( "${1[1]}${(@s::)^1[2,-1]}" )
+
+        if [[ $1 == *=* ]] optarg="${1#*=}"
+      } ;;
+
+      ( * ) break 1 ;;
+    }
+
+    # ———————————————————————————————————————————————— #
+
+    for opt in "${(@)opts}"; {
+      case "$opt" {
+
+        ( -a | --all             )         find_all=1 ;;
+        ( +a | --no-all          )         find_all=0 ;;
+
+        ( -c | --cmd-only        )         cmd_only=1 ;;
+        ( +c | --all-types       )         cmd_only=0 ;;
+
+        ( -r | --alias-r         )     mark_alias_r=1 ;;
+        ( +r | --no-alias-r      )     mark_alias_r=0 ;;
+
+        ( -d | --double-dash     )   do_double_dash=1 ;;
+        ( +d | --no-double-dash  )   do_double_dash=0 ;;
+
+        ( -p | --posix-loops     )  do_posix_for_if=1 ;;
+        ( +p | --short-loops     )  do_posix_for_if=0 ;;
+
+        ( -C | --resolve-case    ) resolve_cmd_case=1 ;;
+        ( +C | --no-resolve-case ) resolve_cmd_case=0 ;;
+
+        # ———————————————————————————————————————————————— #
+
+        ( --colo(u|)r(=*|) ) {
+
+          if [[ $opt == *=* ]] {
+            u_colour=${opt#*=}
+
+            case "$u_colour" {
+              ( auto   ) ;;
+              ( always ) do_colour=1 ;;
+              ( never  ) do_colour=0 ;;
+              ( *      ) {
+                wh::error colour
+                return 1
+              } ;;
+            }
+
+          } else {
+            if [[ $optarg == (always|auto|never) ]] {
+              u_colour=$optarg
+              shift
+
+            } else {
+              u_colour=always
+            }
+          }        
+
+        } ;;
+
+        # ———————————————————————————————————————————————— #
+
+        ( -t(=*|) | --tabs(ize|)(=*|) ) {
+          if [[ $opt == *=* ]] { u_tabsize=${opt#*=}      } \
+          else                 { u_tabsize=$optarg; shift }
+
+          if [[ $u_tabsize != <1-> ]] {
+            wh::error tabsize
+            return 1
+          }
+
+          TABSIZE=$u_tabsize
+        } ;;
+
+        # ———————————————————————————————————————————————— #
+
+        (  --   ) shift; break 2 ;;
+        ( [+-]* ) wh::error option; return 1 ;;
+        (   *   ) break 2 ;;
+      }
+    }
+
+    # ———————————————————————————————————————————————— #
+
+    shift
+  }
 
   # —— base colour definitions ————————————————————— #
 
@@ -227,7 +332,7 @@ function wh::process_input::find_types () { # <- wh::process_input <- wh
         if [[ -e $dir/$input ]] { types+="$type"; break 1; }
       }
 
-    } elif ! (( path_only )) {
+    } elif ! (( cmd_only )) {
       if [[ ${(Pt)type} == *association* ]] {
         if [[ ${${(P)type}[(Ie)$input]} ]] types+="$type"
       } else {
@@ -268,6 +373,7 @@ function wh::aliases () { # <- wh::process_input <- wh
 
   if [[ $alias_body ==
     [[:space:]]#(${~PRECMD}[[:space:]]##|)(#b)((=|)[[:IDENT:]]##)[[:space:]]#
+      && $match[1] != $input
   ]] simple_cmd="$match[1]"
 
   # —— set --options ——————————————————————————————————————————————————— #
@@ -297,12 +403,17 @@ function wh::aliases () { # <- wh::process_input <- wh
     "${(@z)COLOUR_PAGER}" <<< "$alias_body"
   )$quote"
 
-  if [[ -n $simple_cmd ]] line+=' !'
+  # —— non-simple command return ——————————————————————————————————————— #
 
-  # —— output & return ————————————————————————————————————————————————— #
+  if [[ -z $simple_cmd ]] {
+    # if the alias is disabled, add a warning after the alias' body
+    output_lines+="$line $disabled_msg"
+    return
+  }
 
-  # if the alias is disabled, add a warning after the alias' body
-  output_lines+="$line $disabled_msg"
+  # —— simple command recursion ———————————————————————————————————————— #
+
+  output_lines+="$line !" # maybe add the disabled message?
 
   # ———————————————————————————————————————————————————————————————————— #
 }
@@ -621,6 +732,9 @@ function wh::error () { # <- ... <- wh
     ( type-err  ) err="unknown type \`${type/%(e|)s}\`" ;;
     ( no-input  ) err='must provide an input'           ;;
     ( not-found ) err="\`$input\` not found"            ;;
+    ( option    ) err="unknown option \`$opt\`"         ;;
+    ( tabsize   ) err="invalid number: \`$u_tabsize\`"  ;;
+    ( colour    ) err="unknown colour: \`$u_colour\`"   ;;
     ( *         ) err="$*"                              ;;
   }
 
