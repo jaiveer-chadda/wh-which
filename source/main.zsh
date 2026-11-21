@@ -111,6 +111,22 @@ function whh () {
       --exclude=compress --exclude=tar --exclude=json --exclude=cdf
   )
 
+  # ———————————————————————————————————————————————— #
+
+  local -ra COMMAND_TYPES=(
+    'Bourne-Again shell script *'     "$LRD"  '' 'bash script'
+    'POSIX shell script *'            "$BLU"  '󱆃' 'bourne shell script'
+    "Paul Falstad's zsh script *"     "$ORA"  '' 'zsh script'
+    'Python script *'                 "$YEL"  '󰌠' 'python script'
+    'Perl script *'                   "$CYN"  '' 'perl script'
+
+    'a (*) script text executable *'  "$MAG"  '' '$match[1] script'
+
+    'Mach-O 64-bit executable *'      "$RED"  '' 'mach-o binary'
+    'Mach-O universal binary with *'  "$LRD"  '' 'multi-arch binary'
+    '*'                               "$GRN"  '' 'binary executable'
+  )
+
   # ———————————————————————————————————————————————————————————————————— #
   # ———————————————————————————————————————————————————————————————————— #
 
@@ -405,7 +421,7 @@ function whh::commands () { # <- whh::process_input <- whh
     realpath="$( realpath -q "$cmd_path" )"
 
     if [[ -n "$links" && "$realpath" != "$links[-1]" ]] {
-      line+="$REALPATH_ARROW"
+      line+="$NL$REALPATH_ARROW"
 
       fmt_path="$realpath" is_exe=1
       whh::format_path
@@ -413,10 +429,27 @@ function whh::commands () { # <- whh::process_input <- whh
 
     # ———————————————————————————————————————————————— #
 
-    output_lines+="${magic_out%%$NL*}"
+    whh::parse_magic
     output_lines+="$line"
 
+    if [[ $cmd_path != $match_arr[-1] ]] output_lines+=$HALFLINE
+
     # ———————————————————————————————————————————————— #
+  }
+}
+
+# —— whh::parse_magic () ———————————————————————————————————————————————————— #
+
+function whh::parse_magic () { # <- whh::commands <- whh::process_input <- whh
+  local pattern prefix colour icon cmd_type
+
+  for pattern colour icon cmd_type in "${(@)COMMAND_TYPES}"; {
+    if [[ "$magic_out" != $~pattern ]] continue
+
+    prefix="$colour$icon${colour:+$RESET}"
+
+    eval "output_lines+='$prefix '\"$cmd_type\""
+    return
   }
 }
 
