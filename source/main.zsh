@@ -12,9 +12,11 @@ zmodload zsh/parameter
 #    or is not recognised.
 
 # ——————————————————————————————————————————————————————————————————————————— #
-# —— Main Entry Point ——————————————————————————————————————————————————————— #
+# ── ─── Main Entry Point ─── ───────────────────────────────────────────────── #
 
 function whh () {
+
+  # —— init & set shell options ———————————————————————————————————————— #
 
   setopt local_options warn_create_global typeset_silent
   setopt extended_glob
@@ -23,24 +25,11 @@ function whh () {
   local -i 10 MBEGIN MEND
   local -a match mbegin mend
 
-  # ———————————————————————————————————————————————————————————————————— #
-
-  local -ri 10 ROOT_FUNC_PID=$$
   local -r ROOT_FUNCNAME="${(%):-%N}"
 
-  local -ra SEARCH_ORDER=(
-    aliases     dis_aliases
-    galiases    dis_galiases
-    saliases    dis_saliases
+  # —— user options ———————————————————————————————————————————————————— #
 
-    reswords    dis_reswords    # arrays
-    functions   dis_functions   # functions_source  dis_functions_source
-    builtins    dis_builtins
-    commands  # todo: add a contingency for unix's case-insensitive behaviour
-  )
-
-  # ———————————————————————————————————————————————————————————————————— #
-
+  # TODO: implement a `getopts` loop to set these values
   local -i 10 TABSIZE=4
   local -i 2 mark_alias_r=1
   local -i 2 do_double_dash=1
@@ -52,9 +41,9 @@ function whh () {
 
   if [[ ! -t 1 || -z NO_COLOR ]] do_colour=0 colour_arg='never'
 
-  # ———————————————————————————————————————————————— #
+  # —— base colour definitions ————————————————————— #
 
-  local RESET DIM NODIM GRY DGY LGY LRD RED ORA YEL GRN CYN BLU PUR MAG LMA
+  local RESET DIM NODIM GRY DGY LGY LRD RED ORA YEL GRN CYN BLU LBL PUR MAG LMA
 
   if (( do_colour )) {
     RESET=$'\e[m'   DIM=$'\e[2m'        NODIM=$'\e[22m'
@@ -66,15 +55,17 @@ function whh () {
     YEL=$'\e[93m'
     GRN=$'\e[92m'
     CYN=$'\e[96m'
-    BLU=$'\e[94m'
+    LBL=$'\e[94m'
+    BLU=$'\e[34m'
     PUR=$'\e[38;5;170m'
     MAG=$'\e[35m'
     LMA=$'\e[95m'
   }
 
-  local -r RESWORD_CLR="$LMA" OPTIONS_CLR="$PUR"
-  local -r BUILTIN_CLR="$LRD" COMMAND_CLR="$BLU"
+  # —— colour & graphical definitions —————————————— #
 
+  local -r RESWORD_CLR="$LMA" OPTIONS_CLR="$PUR"
+  local -r BUILTIN_CLR="$LRD" COMMAND_CLR="$LBL"
   local -r COMMENT_CLR="$LGY" COMHASH_CLR="$DGY"
 
   local -r SGL_QU="$DIM$GRN'$RESET"
@@ -90,28 +81,31 @@ function whh () {
   local -r UNLOADED_MSG="$YEL$DIM(${NODIM}unloaded$DIM)$RESET"
 
   local -r  SYMLINK_ARROW=" $GRY-->$RESET "
-  local -r REALPATH_ARROW=" $BLU==>$RESET "
+  local -r REALPATH_ARROW=" $LBL==>$RESET "
 
   local -r     LINE="$DIM${(r:COLUMNS  ::─:)}$RESET"
   local -r HALFLINE="$DIM${(r:COLUMNS/2::─:)}$RESET"
   local -r QUARLINE="$DIM${(r:COLUMNS/4::─:)}$RESET"
 
-  # ———————————————————————————————————————————————— #
+  # —— convenience constants ——————————————————————— #
 
   local -r SP=' ' SQ=\' DQ=\"
   local -r NL=$'\n' HT=$'\t'
+
+  # —— parsing & pattern definitions ——————————————— #
+
+  local -ra SEARCH_ORDER=(
+    aliases     dis_aliases
+    galiases    dis_galiases
+    saliases    dis_saliases
+
+    reswords    dis_reswords  # note: these are the only two arrays
+    functions   dis_functions # sources: functions_source, dis_functions_source
+    builtins    dis_builtins
+    commands
+  )
+
   local -r PRECMD='(-|builtin|command|exec|nocorrect|noglob)'
-
-  local -ra COLOUR_PAGER=(
-    bat --style=plain --paging=never --language=zsh --color="$colour_arg"
-  )
-
-  local -ra FILE_CMD=(
-    file -E --dereference --brief --preserve-date
-      --exclude=compress --exclude=tar --exclude=json --exclude=cdf
-  )
-
-  # ———————————————————————————————————————————————— #
 
   local -ra COMMAND_TYPES=(
     'Bourne-Again shell script *'     "$LRD"  '' 'bash script'
@@ -127,36 +121,52 @@ function whh () {
     '*'                               "$GRN"  '' 'binary executable'
   )
 
-  # ———————————————————————————————————————————————————————————————————— #
-  # ———————————————————————————————————————————————————————————————————— #
+  # —— external command definitions ———————————————— #
+
+  local -ra COLOUR_PAGER=(
+    bat --style=plain --paging=never --language=zsh --color="$colour_arg"
+  )
+
+  local -ra FILE_CMD=(
+    file -E --dereference --brief --preserve-date
+      --exclude=compress --exclude=tar --exclude=json --exclude=cdf
+  )
+
+  # —— ————————————————————————————————————————————————————————————————— #
+  # —— parse & process inputs —————————————————————————————————————————— #
 
   local -ra inputs=( "$@" )
-  if ! (( $#inputs )) whh::error no-input && return 1
-
-  # ———————————————————————————————————————————————— #
+  if ! (( $#inputs )) wh::error no-input && return 1
 
   local input= output=
-  for input in "${(@)inputs}"; whh::process_input
+  for input in "${(@)inputs}"; wh::process_input
 
-  # ———————————————————————————————————————————————————————————————————— #
+  # —— output & return ————————————————————————————————————————————————— #
 
   if [[ -n "$output" ]] echo -E - "$output"
+
+  return 0
+
+  # ———————————————————————————————————————————————————————————————————— #
 }
 
 # ——————————————————————————————————————————————————————————————————————————— #
-# —— whh::process_input () —————————————————————————————————————————————————— #
+# ── ── process_input () ── ───────────────────────────────────────────────── #
 
-function whh::process_input () { # <- whh
+function wh::process_input () { # <- wh
+
+  # —— find applicable types ——————————————————————— #
+
   local -a types=() output_lines=()
-  whh::find_types
+  wh::process_input::find_types
 
-  if ! (( $#types )) whh::error not-found && return  # move on to next input
+  if ! (( $#types )) wh::error not-found && return  # move on to next input
 
   # ———————————————————————————————————————————————— #
 
   output_lines+="$HALFLINE"  # add an initial dividing line
 
-  # ———————————————————————————————————————————————— #
+  # —— determine type categories ——————————————————— #
 
   local -i 2 is_disabled=0
   local type type_func disabled_msg
@@ -175,26 +185,26 @@ function whh::process_input () { # <- whh
     if [[ $type_func == [gs]aliases ]] type_func="${type_func#?}"
 
     # prepend the namespace prefix to the type_func
-    type_func="whh::$type_func"
+    type_func="wh::$type_func"
 
-    # if `whh::$type_func` isn't a function, then something's gone wrong
+    # if `wh::$type_func` isn't a function, then something's gone wrong
     #  this should basically never run, but it's here as a backup
-    if ! [[ $functions[(Ie)$type_func] ]] whh::error type-err && continue
+    if ! [[ $functions[(Ie)$type_func] ]] wh::error type-err && continue
 
-    # ——————————————————————————————————— #
+    # —— send input for processing —————— #
 
     "$type_func"  # run the function associated with this type
     output_lines+="$HALFLINE"  # add a dividing line
   }
 
-  # ———————————————————————————————————————————————— #
+  # —— output & return ————————————————————————————— #
 
   output+="${(F)output_lines}"
 }
 
-# —— whh::find_types () ————————————————————————————————————————————————————— #
+# —— process_input::find_types () ——————————————————————————————————————————— #
 
-function whh::find_types () { # <- whh::process_input <- whh
+function wh::process_input::find_types () { # <- wh::process_input <- wh
   # check if the input is each of the the associative/regular arrays
   #  - for assoc   arrays, we need to check that the match's strlen isn't 0
   #  - for regular arrays, we need to check that the match's index  isn't 0
@@ -217,13 +227,16 @@ function whh::find_types () { # <- whh::process_input <- whh
 }
 
 # ——————————————————————————————————————————————————————————————————————————— #
-# —— whh::aliases ——————————————————————————————————————————————————————————— #
+# ── ── aliases () ── ─────────────────────────────────────────────────────── #
 
-function whh::aliases () { # <- whh::process_input <- whh
+function wh::aliases () { # <- wh::process_input <- wh
+
+  # —— format input ———————————————————————————————— #
+
   local -r alias_type="${${type#dis_}[1]}"
   local -r alias_body="${${(P)type}[$input]}"
 
-  # ———————————————————————————————————————————————— #
+  # —— determine quoting rules ————————————————————— #
 
   # TODO: improve - it isn't great, but it'll do for now
   local quote
@@ -232,17 +245,17 @@ function whh::aliases () { # <- whh::process_input <- whh
   elif [[ $alias_body == *$SP* ]] { quote="$SGL_QU" } \
   else                            { quote=          }
 
-  # ———————————————————————————————————————————————— #
+  # —— find exact aliases —————————————————————————— #
 
   # TODO: implement
   local -i 2 is_simple=0
 
   if [[ $alias_body ==
     [[:space:]]#(${~PRECMD}[[:space:]]##|)(#b)((=|)[[:IDENT:]]##)[[:space:]]#
-    && ${match[1]#=} != $input
+      && ${match[1]#=} != $input
   ]] is_simple=1
 
-  # ———————————————————————————————————————————————————————————————————— #
+  # —— set --options ——————————————————————————————————————————————————— #
 
   local line="${RESWORD_CLR}alias "
   local opts_str=
@@ -256,29 +269,36 @@ function whh::aliases () { # <- whh::process_input <- whh
 
   line+="$COMMAND_CLR$input$CYN="
 
-  # ———————————————————————————————————————————————— #
+  # —— syntax highlighting ————————————————————————— #
 
   line+="$quote$(
     "${(@z)COLOUR_PAGER}" <<< "$alias_body"
   )$quote"
 
-  # ———————————————————————————————————————————————————————————————————— #
+  # —— output & return ————————————————————————————————————————————————— #
 
   output_lines+="$line $disabled_msg"
+
+  # ———————————————————————————————————————————————————————————————————— #
 }
 
-# —— whh::reswords —————————————————————————————————————————————————————————— #
+# ——————————————————————————————————————————————————————————————————————————— #
+# ── ── reswords () ── ────────────────────────────────────────────────────── #
 
-function whh::reswords () { # <- whh::process_input <- whh
+function wh::reswords () { # <- wh::process_input <- wh
   output_lines+="$RESWORD_CLR$input$RESET : shell reserved word $disabled_msg"
 }
 
-# —— whh::functions ————————————————————————————————————————————————————————— #
+# ——————————————————————————————————————————————————————————————————————————— #
+# ── ── functions () ── ───────────────────────────────────────────────────── #
 
-function whh::functions () { # <- whh::process_input <- whh
+function wh::functions () { # <- wh::process_input <- wh
+
+  # —— format input ———————————————————————————————— #
+
   local -a func_lines=( "${(@f)${(P)type}[$input]}" )
 
-  # ———————————————————————————————————————————————— #
+  # —— parse function redirect ————————————————————— #
 
   local redirect=
 
@@ -288,13 +308,13 @@ function whh::functions () { # <- whh::process_input <- whh
     shift -p func_lines
   }
 
-  # ———————————————————————————————————————————————— #
+  # —— replace tabs w spaces ——————————————————————— #
 
   func_lines=(
     "${(@)func_lines/#(#m)$HT#/${(r.( $#MATCH ? $#MATCH : 1 ) * TABSIZE.)}}"
   )
 
-  # ———————————————————————————————————————————————— #
+  # —— prettify for / if statements ———————————————— #
 
   local body="${(F)func_lines}"
 
@@ -309,7 +329,7 @@ function whh::functions () { # <- whh::process_input <- whh
     body="${body//$NL(#b)($SP#)else/$NL$match[1]\} else {}"
   }
 
-  # ———————————————————————————————————————————————— #
+  # —— find function source ———————————————————————— #
 
   local func_source="${${(P)${type/%/_source}}[$input]}"
 
@@ -326,7 +346,7 @@ function whh::functions () { # <- whh::process_input <- whh
     if [[ -z $func_source ]] func_source='autoload shell function'
   }
 
-  # ———————————————————————————————————————————————————————————————————— #
+  # —— set --options ——————————————————————————————————————————————————— #
 
   local line="${RESWORD_CLR}function "
   local opts_str=
@@ -339,7 +359,7 @@ function whh::functions () { # <- whh::process_input <- whh
 
   if [[ -n $opts_str ]] line+="$OPTIONS_CLR$opts_str"
 
-  # ———————————————————————————————————————————————— #
+  # —— colourise & assemble ———————————————————————— #
 
   line+="$COMMAND_CLR$input$RED () {"
   if (( is_disabled )) line+="  $DISB_COMMENT"
@@ -349,13 +369,18 @@ function whh::functions () { # <- whh::process_input <- whh
 
   if [[ -n $redirect ]] line+=" $( "${(@z)COLOUR_PAGER}" <<< "$redirect" )"
 
+  # —— output & return ————————————————————————————— #
+
   output_lines+="$COMMENT ${func_source/#$HOME/~}$RESET"
   output_lines+="$line"
+
+  # ———————————————————————————————————————————————— #
 }
 
-# —— whh::builtins —————————————————————————————————————————————————————————— #
+# ——————————————————————————————————————————————————————————————————————————— #
+# ── ── builtins () ── ────────────────────────────────────────────────────── #
 
-function whh::builtins () { # <- whh::process_input <- whh
+function wh::builtins () { # <- wh::process_input <- wh
   local -r line="$BUILTIN_CLR$input$RESET : shell builtin"
 
   local load_msg="$LOADED_MSG"
@@ -364,9 +389,13 @@ function whh::builtins () { # <- whh::process_input <- whh
   output_lines+="$line $load_msg $disabled_msg"
 }
 
-# —— whh::commands —————————————————————————————————————————————————————————— #
+# ——————————————————————————————————————————————————————————————————————————— #
+# ── ── commands () ── ────────────────────────────────────────────────────── #
 
-function whh::commands () { # <- whh::process_input <- whh
+function wh::commands () { # <- wh::process_input <- wh
+
+  # —— parse $PATH for matches ————————————————————— #
+
   local dir cmd_path
   local -a match_arr magic_arr path_match
 
@@ -377,7 +406,7 @@ function whh::commands () { # <- whh::process_input <- whh
 
     if (( resolve_cmd_case )) {
       path_match=( (#i)$cmd_path(DN) )
-      if ! (( $#path_match == 1 )) whh::error mult-cmd
+      if ! (( $#path_match == 1 )) wh::error mult-cmd
 
       cmd_path="$path_match[1]"
     }
@@ -386,7 +415,7 @@ function whh::commands () { # <- whh::process_input <- whh
     magic_arr+="$( "${(@z)FILE_CMD}" -- "$cmd_path" )"
   }
 
-  # ———————————————————————————————————————————————— #
+  # —— iterate through matches ————————————————————————————————————————— #
 
   local -i 10 i
   local -a links
@@ -395,6 +424,8 @@ function whh::commands () { # <- whh::process_input <- whh
 
   for cmd_path magic_out in "${(@)match_arr:^magic_arr}"; {
 
+    # —— resolve symlinks ———————————————————————————— #
+
     target="$cmd_path" line= links=()
 
     while [[ -h $target ]] {
@@ -402,21 +433,21 @@ function whh::commands () { # <- whh::process_input <- whh
       links+="$target"
     }
 
-    # ———————————————————————————————————————————————— #
+    # —— add symlinks to output —————————————————————— #
 
     fmt_path="$cmd_path" is_exe=$(( $#links == 0 ))
-    whh::format_path
+    wh::commands::path
 
     if (( $#links )) {
       for i in {1..$#links}; {
         line+="$SYMLINK_ARROW"
 
         fmt_path="$links[i]" is_exe=$(( i == $#links ))
-        whh::format_path
+        wh::commands::path
       }
     }
 
-    # ———————————————————————————————————————————————— #
+    # —— get realpath ———————————————————————————————— #
 
     realpath="$( realpath -q "$cmd_path" )"
 
@@ -424,12 +455,12 @@ function whh::commands () { # <- whh::process_input <- whh
       line+="$NL$REALPATH_ARROW"
 
       fmt_path="$realpath" is_exe=1
-      whh::format_path
+      wh::commands::path
     }
 
-    # ———————————————————————————————————————————————— #
+    # —— output —————————————————————————————————————— #
 
-    whh::parse_magic
+    wh::commands::magic
     output_lines+="$line"
 
     if [[ $cmd_path != $match_arr[-1] ]] output_lines+=$HALFLINE
@@ -438,24 +469,22 @@ function whh::commands () { # <- whh::process_input <- whh
   }
 }
 
-# —— whh::parse_magic () ———————————————————————————————————————————————————— #
+# —— commands::magic () ————————————————————————————————————————————————————— #
 
-function whh::parse_magic () { # <- whh::commands <- whh::process_input <- whh
-  local pattern prefix colour icon cmd_type
+function wh::commands::magic () { # <- wh::commands <- wh::process_input <- wh
+  local pattern colour icon cmd_type
 
   for pattern colour icon cmd_type in "${(@)COMMAND_TYPES}"; {
     if [[ "$magic_out" != $~pattern ]] continue
 
-    prefix="$colour$icon${colour:+$RESET}"
-
-    eval "output_lines+='$prefix '\"$cmd_type\""
+    eval "output_lines+='$colour$icon${colour:+$RESET} '\"$cmd_type\""
     return
   }
 }
 
-# —— whh::format_path () ———————————————————————————————————————————————————— #
+# —— commands::path () —————————————————————————————————————————————————————— #
 
-function whh::format_path () { # <- whh::commands <- whh::process_input <- whh
+function wh::commands::path () { # <- wh::commands <- wh::process_input <- wh
   line+="$CYN${${fmt_path/#$HOME/~}%/*}/"
 
   if (( is_exe )) { line+="$RED" } else { line+="$MAG" }
@@ -464,9 +493,9 @@ function whh::format_path () { # <- whh::commands <- whh::process_input <- whh
 }
 
 # ——————————————————————————————————————————————————————————————————————————— #
-# —— whh::error () —————————————————————————————————————————————————————————— #
+# ── ── error () ── ───────────────────────────────────────────────────────── #
 
-function whh::error () { # <- ... <- whh
+function wh::error () { # <- ... <- wh
   local err=
   case "$1" {
     ( mult-cmd  ) err="multiple commands found: ${(j:,:)path_match}" ;;
