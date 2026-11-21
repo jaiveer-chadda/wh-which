@@ -31,6 +31,9 @@ function whh () {
 
   # TODO: implement a `getopts` loop to set these values
   local -i 10 TABSIZE=4
+
+  local -i 2 find_all=1
+  local -i 2 path_only=0
   local -i 2 mark_alias_r=1
   local -i 2 do_double_dash=1
   local -i 2 do_posix_for_if=1
@@ -94,7 +97,7 @@ function whh () {
 
   # —— convenience constants ——————————————————————— #
 
-  local -r SP=' ' SQ=\' DQ=\"
+  local -r SP=' ' SQ=\' DQ=\" EQ=\=
   local -r NL=$'\n' HT=$'\t'
 
   # —— parsing & pattern definitions ——————————————— #
@@ -223,11 +226,17 @@ function wh::process_input::find_types () { # <- wh::process_input <- wh
       for dir in "${(@)path}"; { # stop searching after the first match
         if [[ -e $dir/$input ]] { types+="$type"; break 1; }
       }
-    } elif [[ ${(Pt)type} == *association* ]] {
-      if [[ ${${(P)type}[(Ie)$input]} ]] types+="$type"
-    } else {
-      if (( ${${(P)type}[(Ie)$input]} )) types+="$type"
+
+    } elif ! (( path_only )) {
+      if [[ ${(Pt)type} == *association* ]] {
+        if [[ ${${(P)type}[(Ie)$input]} ]] types+="$type"
+      } else {
+        if (( ${${(P)type}[(Ie)$input]} )) types+="$type"
+      }
     }
+
+    # if we found something, and we're only getting 1 match, then stop here
+    if (( $#types && ! find_all )) return
   }
 }
 
@@ -248,19 +257,18 @@ function wh::aliases () { # <- wh::process_input <- wh
   case "$alias_body" {
     ( *"$SQ"* ) quote="$DBL_QU" ;;
     ( *"$DQ"* ) quote="$SGL_QU" ;;
+    ( *"$EQ"* ) ;&
     ( *"$SP"* ) quote="$SGL_QU" ;;
     ( *       ) quote=          ;;
   }
 
   # —— find exact aliases —————————————————————————— #
 
-  # TODO: implement
-  local -i 2 is_simple=0
+  local simple_cmd=
 
   if [[ $alias_body ==
     [[:space:]]#(${~PRECMD}[[:space:]]##|)(#b)((=|)[[:IDENT:]]##)[[:space:]]#
-      && ${match[1]#=} != $input
-  ]] is_simple=1
+  ]] simple_cmd="$match[1]"
 
   # —— set --options ——————————————————————————————————————————————————— #
 
@@ -289,7 +297,7 @@ function wh::aliases () { # <- wh::process_input <- wh
     "${(@z)COLOUR_PAGER}" <<< "$alias_body"
   )$quote"
 
-  if (( is_simple )) line+=' !'
+  if [[ -n $simple_cmd ]] line+=' !'
 
   # —— output & return ————————————————————————————————————————————————— #
 
@@ -486,6 +494,9 @@ function wh::commands () { # <- wh::process_input <- wh
     # while we have the path of the command, pass it through `file`
     #  to get some additional information about the executable
     magic_arr+="$( "${(@z)FILE_CMD}" -- "$cmd_path" )"
+
+    # if we only want the first match, then don't bother going any further
+    if ! (( find_all )) break
   }
 
   # —— iterate through matches ————————————————————————————————————————— #
