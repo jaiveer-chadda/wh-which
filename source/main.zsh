@@ -240,10 +240,12 @@ function wh::aliases () { # <- wh::process_input <- wh
 
   # TODO: improve - it isn't great, but it'll do for now
   local quote
-  if   [[ $alias_body == *$SQ* ]] { quote="$DBL_QU" } \
-  elif [[ $alias_body == *$DQ* ]] { quote="$SGL_QU" } \
-  elif [[ $alias_body == *$SP* ]] { quote="$SGL_QU" } \
-  else                            { quote=          }
+  case "$alias_body" {
+    ( *"$SQ"* ) quote="$DBL_QU" ;;
+    ( *"$DQ"* ) quote="$SGL_QU" ;;
+    ( *"$SP"* ) quote="$SGL_QU" ;;
+    ( *       ) quote=          ;;
+  }
 
   # —— find exact aliases —————————————————————————— #
 
@@ -260,23 +262,31 @@ function wh::aliases () { # <- wh::process_input <- wh
   local line="${RESWORD_CLR}alias "
   local opts_str=
 
+  # if the alias is global or suffixed, then add the options unconditionally
   if [[ $alias_type == [gs] ]] { opts_str+="-$alias_type " } \
   elif (( mark_alias_r ))      { opts_str+="-r "           }
+  # if it's a normal alias, then (based on the user's choice), add the `-r` opt
 
+  # if the alias' name starts with a hyphen
+  #  then it'd have to be defined as `alias -- -name`
   if [[ $do_double_dash -ne 0 && $input[1] == '-' ]] line+="$OPTIONS_CLR-- "
 
-  if [[ -n $opts_str ]] line+="$OPTIONS_CLR$opts_str"
+  # only add the options colour if the options string is actually defined
+  line+="${opts_str:+$OPTIONS_CLR$opts_str}"
 
+  # `name` and `=` in `alias -- name=def`
   line+="$COMMAND_CLR$input$CYN="
 
   # —— syntax highlighting ————————————————————————— #
 
+  # pass the entire alias body straight to `bat` - it'll highlight everything
   line+="$quote$(
     "${(@z)COLOUR_PAGER}" <<< "$alias_body"
   )$quote"
 
   # —— output & return ————————————————————————————————————————————————— #
 
+  # if the alias is disabled, add a warning after the alias' body
   output_lines+="$line $disabled_msg"
 
   # ———————————————————————————————————————————————————————————————————— #
@@ -296,52 +306,77 @@ function wh::functions () { # <- wh::process_input <- wh
 
   # —— format input ———————————————————————————————— #
 
+  # get the function body from the assoc array (`functions` / `dis_functions`)
+  #  and split it by line
   local -a func_lines=( "${(@f)${(P)type}[$input]}" )
 
   # —— parse function redirect ————————————————————— #
 
   local redirect=
 
+  # if the function is entirely defined in a group with a redirect
+  #  i.e. `function name () { ... } >&2`
   if [[ $func_lines[+1] == '{' && $func_lines[-1] == '}'* ]] {
+    # then capture the redirect (so we can add it back later)
     redirect="${func_lines[-1]#\} }"
+    # and remove the outer `{` group `}` (remove the first and last lines)
     shift    func_lines
     shift -p func_lines
   }
 
   # —— replace tabs w spaces ——————————————————————— #
 
+  # match any (or 0) tabs at the beginning of each line
+  #  however many tabs we captured, replace them with `$TABSIZE` spaces
+  # at a minimum, if we don't capture anything (`$#MATCH == 0`), add `1` tab
   func_lines=(
     "${(@)func_lines/#(#m)$HT#/${(r.( $#MATCH ? $#MATCH : 1 ) * TABSIZE.)}}"
   )
 
   # —— prettify for / if statements ———————————————— #
 
+  # re-join the lines into one big string
   local body="${(F)func_lines}"
 
+  # if using POSIX-style if/for/while/etc statements...
   if (( do_posix_for_if )) {
+    # simply replace `then`/`do` at the beginning of a line with `; then/do`
     body="${body//$NL$SP#(#b)(then|do)$NL/; $match[1]$NL}"
+
   } else {
+    # if, however, we're using zsh's short loops, then:
+    # replace `then` with `{` and `for` with `; {`
     body="${body//$NL$SP#then$NL/ {$NL}"
     body="${body//$NL$SP#do$NL/; {$NL}"
 
+    # add brackets to all the `if` / `elif` / `else` statements
     body="${body//$NL(#b)($SP#)(fi|done)($NL|(#e))/$NL$match[1]\}$NL}"
     body="${body//$NL(#b)($SP#)elif/$NL$match[1]\} elif}"
     body="${body//$NL(#b)($SP#)else/$NL$match[1]\} else {}"
+
+    # note: the reason short loops aren't the default is because
+    #  `bat` isn't able to parse them correctly
   }
 
   # —— find function source ———————————————————————— #
 
+  # add `_source` to the end of the array's name
+  #  (i.e. `dis_functions` --> `dis_functions_source`)
+  # then get the name of the current function from the assoc array
   local func_source="${${(P)${type/%/_source}}[$input]}"
 
   # if `func_source` is empty, it's likely an autoloaded function
   if [[ -z $func_source ]] {
     local _path # go fish !!
+
+    # look through all function paths for a file matching this function's name
     for _path in "${(@)fpath}"; {
       if [[ -f "$_path/$input" ]] {
         func_source="$_path/$input"
         break  # stop searching at the first match
       }
     }
+
     # if we _still_ couldn't find anything, just use an appropriate default
     if [[ -z $func_source ]] func_source='autoload shell function'
   }
@@ -351,27 +386,42 @@ function wh::functions () { # <- wh::process_input <- wh
   local line="${RESWORD_CLR}function "
   local opts_str=
 
+  # get the function body using `typeset -f`
+  #  ignore the body's first line (`[^$NL]##${NL}`)
+  # if the second line contains `# traced`, then we know this function has `-T`
+  # INFO: afaik, this is the only reliable way to tell if a function is traced
   if [[ "$( typeset -f -- "$input" )" ==
     [^$NL]##${NL}[[:space:]]#'# traced'$NL*
   ]] opts_str+='-T '
 
+  # if the function's name starts with a hyphen
+  #  then it'd have to be defined as `function -- -name () { ... }`
   if [[ $do_double_dash -ne 0 && $input[1] == '-' ]] opts_str+='-- '
 
-  if [[ -n $opts_str ]] line+="$OPTIONS_CLR$opts_str"
+  # only add the options colour if the options string is actually defined
+  line+="${opts_str:+$OPTIONS_CLR$opts_str}"
 
   # —— colourise & assemble ———————————————————————— #
 
+  # `function -T --` has been added so far
+  #  now add `funcname () {`
   line+="$COMMAND_CLR$input$RED () {"
+  # if the function is disabled, add a comment after the opening bracket
   if (( is_disabled )) line+="  $DISB_COMMENT"
 
+  # pass the (majority of the) function body to `bat` for highlighting
   line+="$RESET$NL$( "${(@z)COLOUR_PAGER}" <<< "$body" )$NL"
-  line+="$RED}$RESET"
+  line+="$RED}$RESET" # add the closing `}`
 
+  # if we captured a redirect earlier, add it to the end of the function body,
+  #  using `bat` to highlight any tokens
   if [[ -n $redirect ]] line+=" $( "${(@z)COLOUR_PAGER}" <<< "$redirect" )"
 
   # —— output & return ————————————————————————————— #
 
+  # add the function's source path as a comment before the body
   output_lines+="$COMMENT ${func_source/#$HOME/~}$RESET"
+  # then output the "line" (which isn't actually a single line but ykwim)
   output_lines+="$line"
 
   # ———————————————————————————————————————————————— #
@@ -383,9 +433,12 @@ function wh::functions () { # <- wh::process_input <- wh
 function wh::builtins () { # <- wh::process_input <- wh
   local -r line="$BUILTIN_CLR$input$RESET : shell builtin"
 
+  # add an extra message to the end of the builtin's name to specify whether
+  #  it's a loaded/unloaded builtin (zsh calls these `defined` / `undefined`)
   local load_msg="$LOADED_MSG"
   if [[ "${${(P)type}[$input]}" == 'undefined' ]] load_msg="$UNLOADED_MSG"
 
+  # add the disabled message at the end (if applicable)
   output_lines+="$line $load_msg $disabled_msg"
 }
 
@@ -399,19 +452,32 @@ function wh::commands () { # <- wh::process_input <- wh
   local dir cmd_path
   local -a match_arr magic_arr path_match
 
+  # iterate through `$path` ( ≈ `$PATH`), trying to find each occurrence
+  #  of the input name in those directories
   for dir in "${(@)path}"; {
+    # if it doesn't exist, move on & keep searching
     if ! [[ -e "$dir/$input" ]] continue
 
     cmd_path="$dir/$input"
 
+    # since macos uses unix's case-insensitive but case-preserving file naming
+    #  conventions, an input of `cLEaR` would pass `test -e`, but wouldn't
+    #  make much sense as an output, since `/usr/bin/cLEaR` doesn't exist,
+    #   but `/usr/bin/clear` does
     if (( resolve_cmd_case )) {
-      path_match=( (#i)$cmd_path(DN) )
+      # this glob pattern resolves the path to its _actual_ casing
+      path_match=( (#i)$~~cmd_path(DN) )
+      # this is almost an assertion - it shouldn't be possible to get >1 match
       if ! (( $#path_match == 1 )) wh::error mult-cmd
 
+      # replace the command path with its case-resolved version
       cmd_path="$path_match[1]"
     }
 
+    # save the case-resolved (if applicable) command path
     match_arr+="$cmd_path"
+    # while we have the path of the command, pass it through `file`
+    #  to get some additional information about the executable
     magic_arr+="$( "${(@z)FILE_CMD}" -- "$cmd_path" )"
   }
 
@@ -420,49 +486,69 @@ function wh::commands () { # <- wh::process_input <- wh
   local -i 10 i
   local -a links
   local -i 2 is_exe
-  local target magic_out line realpath fmt_path
+  local target magic_out line realpath fmt_path last_path
 
+  # zip the command paths and their `file` outputs together,
+  #  so we can iterate through them simultaneously
   for cmd_path magic_out in "${(@)match_arr:^magic_arr}"; {
 
     # —— resolve symlinks ———————————————————————————— #
 
     target="$cmd_path" line= links=()
 
+    # while we haven't found the target file (`$target` is a symlink)
     while [[ -h $target ]] {
-      target="$( readlink "$target" )" || break
+      # resolve the symlink, and add it to the `$links` array
+      target="$( readlink -- "$target" )" || break
       links+="$target"
     }
 
     # —— add symlinks to output —————————————————————— #
 
+    # send the initial path off for formatting
+    #  if there aren't any links, then this path is the executable itself
     fmt_path="$cmd_path" is_exe=$(( $#links == 0 ))
     wh::commands::path
 
     if (( $#links )) {
+      last_path="$links[-1]"
+
+      # iterate through each link, format it, and add it to the line
       for i in {1..$#links}; {
         line+="$SYMLINK_ARROW"
 
+        # the last "link" in the array is the actual executable
         fmt_path="$links[i]" is_exe=$(( i == $#links ))
         wh::commands::path
       }
+
+    } else {
+      last_path="$cmd_path"
     }
 
     # —— get realpath ———————————————————————————————— #
 
-    realpath="$( realpath -q "$cmd_path" )"
+    realpath="$( realpath -q -- "$cmd_path" )"
 
-    if [[ -n "$links" && "$realpath" != "$links[-1]" ]] {
+    # if the final link isn't the same as the executable's `realpath`, then
+    #  add an arrow to show its path with _all_ symlinks resolved
+    if [[ -n "$realpath" && "$realpath" != "$last_path" ]] {
       line+="$NL$REALPATH_ARROW"
 
+      # the `realpath` will always be an executable
       fmt_path="$realpath" is_exe=1
       wh::commands::path
     }
 
     # —— output —————————————————————————————————————— #
 
+    # format / resolve the output of the `file` command that we got earlier
     wh::commands::magic
+
+    # then add the formatted line (the path(s)) to the output
     output_lines+="$line"
 
+    # if we're not on the last path, add a dividing line
     if [[ $cmd_path != $match_arr[-1] ]] output_lines+=$HALFLINE
 
     # ———————————————————————————————————————————————— #
@@ -474,10 +560,15 @@ function wh::commands () { # <- wh::process_input <- wh
 function wh::commands::magic () { # <- wh::commands <- wh::process_input <- wh
   local pattern colour icon cmd_type
 
+  # iterate through each of the patterns & compare the magic output to each one
+  # this for loop is essentially just a deconstructed switch/case statement
   for pattern colour icon cmd_type in "${(@)COMMAND_TYPES}"; {
     if [[ "$magic_out" != $~pattern ]] continue
 
+    # re-assemble the executable's descriptor - note: one of the patterns uses
+    #  a capturing group, so we use `eval` here to handle the replacement
     eval "output_lines+='$colour$icon${colour:+$RESET} '\"$cmd_type\""
+    # return after the first match
     return
   }
 }
@@ -485,10 +576,13 @@ function wh::commands::magic () { # <- wh::commands <- wh::process_input <- wh
 # —— commands::path () —————————————————————————————————————————————————————— #
 
 function wh::commands::path () { # <- wh::commands <- wh::process_input <- wh
+  # find & format the command's `dirname`
   line+="$CYN${${fmt_path/#$HOME/~}%/*}/"
 
+  # colour the command name based on whether its a link or an executable
   if (( is_exe )) { line+="$RED" } else { line+="$MAG" }
 
+  # colour the command's `basename`
   line+="${fmt_path##*/}$RESET"
 }
 
