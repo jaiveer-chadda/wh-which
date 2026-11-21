@@ -43,10 +43,14 @@ function whh () {
 
   # —— base colour definitions ————————————————————— #
 
-  local RESET DIM NODIM GRY DGY LGY LRD RED ORA YEL GRN CYN BLU LBL PUR MAG LMA
+  local RESET DIM NODIM UDL NOUDL
+  local GRY DGY LGY LRD RED ORA YEL GRN LCY CYN BLU LBL PUR MAG LMA
 
   if (( do_colour )) {
-    RESET=$'\e[m'   DIM=$'\e[2m'        NODIM=$'\e[22m'
+    RESET=$'\e[m'
+    DIM=$'\e[2m' NODIM=$'\e[22m'
+    UDL=$'\e[4m' NOUDL=$'\e[24m'
+
     GRY=$'\e[2;97m' LGY=$'\e[38;5;103m' DGY=$'\e[38;5;240m'
 
     RED=$'\e[31m'
@@ -54,9 +58,10 @@ function whh () {
     ORA=$'\e[38;5;216m'
     YEL=$'\e[93m'
     GRN=$'\e[92m'
-    CYN=$'\e[96m'
-    LBL=$'\e[94m'
+    CYN=$'\e[36m'
+    LCY=$'\e[96m'
     BLU=$'\e[34m'
+    LBL=$'\e[94m'
     PUR=$'\e[38;5;170m'
     MAG=$'\e[35m'
     LMA=$'\e[95m'
@@ -81,7 +86,7 @@ function whh () {
   local -r UNLOADED_MSG="$YEL$DIM(${NODIM}unloaded$DIM)$RESET"
 
   local -r  SYMLINK_ARROW=" $GRY-->$RESET "
-  local -r REALPATH_ARROW=" $LBL==>$RESET "
+  local -r REALPATH_ARROW=" $MAG==>$RESET "
 
   local -r     LINE="$DIM${(r:COLUMNS  ::─:)}$RESET"
   local -r HALFLINE="$DIM${(r:COLUMNS/2::─:)}$RESET"
@@ -108,16 +113,16 @@ function whh () {
   local -r PRECMD='(-|builtin|command|exec|nocorrect|noglob)'
 
   local -ra COMMAND_TYPES=(
-    'Bourne-Again shell script *'     "$LRD"  '' 'bash script'
+    'Bourne-Again shell script *'     "$RED"  '' 'bash script'
     'POSIX shell script *'            "$BLU"  '󱆃' 'bourne shell script'
     "Paul Falstad's zsh script *"     "$ORA"  '' 'zsh script'
     'Python script *'                 "$YEL"  '󰌠' 'python script'
-    'Perl script *'                   "$CYN"  '' 'perl script'
+    'Perl script *'                   "$LCY"  '' 'perl script'
 
     'a (*) script text executable *'  "$MAG"  '' '$match[1] script'
 
-    'Mach-O 64-bit executable *'      "$RED"  '' 'mach-o binary'
-    'Mach-O universal binary with *'  "$LRD"  '' 'multi-arch binary'
+    'Mach-O 64-bit executable *'      "$LRD"  '' 'mach-o binary'
+    'Mach-O universal binary with *'  "$PUR"  '' 'multi-arch binary'
     '*'                               "$GRN"  '' 'binary executable'
   )
 
@@ -275,7 +280,7 @@ function wh::aliases () { # <- wh::process_input <- wh
   line+="${opts_str:+$OPTIONS_CLR$opts_str}"
 
   # `name` and `=` in `alias -- name=def`
-  line+="$COMMAND_CLR$input$CYN="
+  line+="$COMMAND_CLR$input$LCY="
 
   # —— syntax highlighting ————————————————————————— #
 
@@ -283,6 +288,8 @@ function wh::aliases () { # <- wh::process_input <- wh
   line+="$quote$(
     "${(@z)COLOUR_PAGER}" <<< "$alias_body"
   )$quote"
+
+  if (( is_simple )) line+=' !'
 
   # —— output & return ————————————————————————————————————————————————— #
 
@@ -494,7 +501,7 @@ function wh::commands () { # <- wh::process_input <- wh
 
     # —— resolve symlinks ———————————————————————————— #
 
-    target="$cmd_path" line= links=()
+    target="$cmd_path" realpath= line= links=()
 
     # while we haven't found the target file (`$target` is a symlink)
     while [[ -h $target ]] {
@@ -576,14 +583,21 @@ function wh::commands::magic () { # <- wh::commands <- wh::process_input <- wh
 # —— commands::path () —————————————————————————————————————————————————————— #
 
 function wh::commands::path () { # <- wh::commands <- wh::process_input <- wh
-  # find & format the command's `dirname`
-  line+="$CYN${${fmt_path/#$HOME/~}%/*}/"
+
+  local path_col="$CYN" under=
+  # this statement is essentially asking whether this is the final path or not
+  if [[ $#links -eq 0 || -n $realpath ]] path_col="$LBL" under="$UDL"
+
+  if [[ $fmt_path == */* ]] {
+    # find & format the command's `dirname`
+    line+="$path_col$under${${fmt_path/#$HOME/~}%/*}${under:+$NOUDL}/"
+  }
 
   # colour the command name based on whether its a link or an executable
   if (( is_exe )) { line+="$RED" } else { line+="$MAG" }
 
   # colour the command's `basename`
-  line+="${fmt_path##*/}$RESET"
+  line+="$under${fmt_path##*/}$RESET"
 }
 
 # ——————————————————————————————————————————————————————————————————————————— #
@@ -608,4 +622,4 @@ function wh::error () { # <- ... <- wh
 # ——————————————————————————————————————————————————————————————————————————— #
 
 # spell:ignoreRegexp /[gs]aliases\b/g
-# spell:ignore nodim disb mult
+# spell:ignore nodim disb mult noudl
