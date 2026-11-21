@@ -31,39 +31,31 @@ function whh () {
 
   local -i 10 TABSIZE=4
 
-  local -i 2 find_all=1
-  local -i 2 cmd_only=0
-  local -i 2 mark_alias_r=1
-  local -i 2 do_double_dash=1
-  local -i 2 do_posix_for_if=1
-  local -i 2 resolve_cmd_case=1
+  local -i 2  find_all=1   mark_alias_r=1  do_posix_for_if=1 cmd_only=0
+  local -i 2 do_colour=1 do_double_dash=1 resolve_cmd_case=1
 
-  local -i 2 do_colour=1
-
-  local u_colour='auto'
-  local u_tabsize
-
-  local colour_arg='always'
+  local u_tabsize u_colour='auto' colour_arg='always'
 
   if [[ ! -t 1 || -z NO_COLOR ]] do_colour=0 colour_arg='never'
 
   # ———————————————————————————————————————————————— #
 
   local opt optarg
-  local -a  opts
+  local -a opts
 
   while (( $# )) {
 
     # ———————————————————————————————————————————————— #
 
+    # `optarg` will be the next argument by default
     optarg="$2"
 
     case "$1" {
+      # long options should be treated as normal
       ( --* ) opts=( "$1" ) ;;
 
       ( [-+]* ) {
         opts=( "${1[1]}${(@s::)^1[2,-1]}" )
-
         if [[ $1 == *=* ]] optarg="${1#*=}"
       } ;;
 
@@ -74,7 +66,6 @@ function whh () {
 
     for opt in "${(@)opts}"; {
       case "$opt" {
-
         ( -a | --all             )         find_all=1 ;;
         ( +a | --no-all          )         find_all=0 ;;
 
@@ -96,7 +87,6 @@ function whh () {
         # ———————————————————————————————————————————————— #
 
         ( --colo(u|)r(=*|) ) {
-
           if [[ $opt == *=* ]] {
             u_colour=${opt#*=}
 
@@ -119,7 +109,6 @@ function whh () {
               u_colour=always
             }
           }        
-
         } ;;
 
         # ———————————————————————————————————————————————— #
@@ -151,28 +140,25 @@ function whh () {
 
   # —— base colour definitions ————————————————————— #
 
-  local RESET DIM NODIM UDL NOUDL
-  local GRY DGY LGY LRD RED ORA YEL GRN LCY CYN BLU LBL PUR MAG LMA
+  local RESET DIM NODIM UDL NOUDL \
+    GRY DGY LGY LRD RED ORA YEL GRN LCY CYN BLU LBL PUR MAG LMA
 
   if (( do_colour )) {
     RESET=$'\e[m'
+
     DIM=$'\e[2m' NODIM=$'\e[22m'
     UDL=$'\e[4m' NOUDL=$'\e[24m'
 
     GRY=$'\e[2;97m' LGY=$'\e[38;5;103m' DGY=$'\e[38;5;240m'
 
-    RED=$'\e[31m'
-    LRD=$'\e[91m'
+    RED=$'\e[31m' LRD=$'\e[91m'
     ORA=$'\e[38;5;216m'
     YEL=$'\e[93m'
     GRN=$'\e[92m'
-    CYN=$'\e[36m'
-    LCY=$'\e[96m'
-    BLU=$'\e[34m'
-    LBL=$'\e[94m'
+    CYN=$'\e[36m' LCY=$'\e[96m'
+    BLU=$'\e[34m' LBL=$'\e[94m'
     PUR=$'\e[38;5;170m'
-    MAG=$'\e[35m'
-    LMA=$'\e[95m'
+    MAG=$'\e[35m' LMA=$'\e[95m'
   }
 
   # —— colour & graphical definitions —————————————— #
@@ -180,10 +166,6 @@ function whh () {
   local -r RESWORD_CLR="$LMA" OPTIONS_CLR="$PUR"
   local -r BUILTIN_CLR="$LRD" COMMAND_CLR="$LBL"
   local -r COMMENT_CLR="$LGY" COMHASH_CLR="$DGY"
-
-  local -r SGL_QU="$DIM$GRN'$RESET"
-  local -r DBL_QU="$DIM$GRN\"$RESET"
-  local -r DLR_QU="$DIM$GRN\$'$RESET"
 
   local -r COMMENT="$COMHASH_CLR#$COMMENT_CLR"
 
@@ -200,22 +182,18 @@ function whh () {
   local -r HALFLINE="$DIM${(r:COLUMNS/2::─:)}$RESET"
   local -r QUARLINE="$DIM${(r:COLUMNS/4::─:)}$RESET"
 
-  # —— convenience constants ——————————————————————— #
-
-  local -r SP=' ' SQ=\' DQ=\" EQ=\=
-  local -r NL=$'\n' HT=$'\t'
+  local -r NL=$'\n' HT=$'\t' SP=\  SQ=\' DQ=\" EQ=\=
 
   # —— parsing & pattern definitions ——————————————— #
 
   local -ra SEARCH_ORDER=(
-    aliases     dis_aliases
-    galiases    dis_galiases
-    saliases    dis_saliases
+    {,dis_}{,g,s}aliases  # regular, global, and suffix aliases
 
-    reswords    dis_reswords  # note: these are the only two arrays
-    functions   dis_functions # sources: functions_source, dis_functions_source
-    builtins    dis_builtins
-    commands
+    {,dis_}reswords       # these are both arrays - all others are assocs
+    {,dis_}functions      # sources: functions_source, dis_functions_source
+    {,dis_}builtins
+
+    commands              # commands can't be disabled
   )
 
   local -r PRECMD='(-|builtin|command|exec|nocorrect|noglob)'
@@ -358,14 +336,16 @@ function wh::aliases () { # <- wh::process_input <- wh
   # —— determine quoting rules ————————————————————— #
 
   # TODO: improve - it isn't great, but it'll do for now
-  local quote
+  local quote=
   case "$alias_body" {
-    ( *"$SQ"* ) quote="$DBL_QU" ;;
-    ( *"$DQ"* ) quote="$SGL_QU" ;;
+    ( *"$SQ"* ) quote='"' ;;
+    ( *"$DQ"* ) quote="'" ;;
     ( *"$EQ"* ) ;&
-    ( *"$SP"* ) quote="$SGL_QU" ;;
-    ( *       ) quote=          ;;
+    ( *"$SP"* ) quote="'" ;;
+    ( *       ) quote=    ;;
   }
+
+  quote="${quote:+$DIM$GRN$quote$RESET}"
 
   # —— find exact aliases —————————————————————————— #
 
