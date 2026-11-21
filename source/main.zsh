@@ -54,30 +54,28 @@ function whh () {
 
   # ———————————————————————————————————————————————— #
 
-  local RESET DIM NODIM RED ORA YEL GRN CYN BLU MAG LMA GRY
-  local {BUILTIN,OPTIONS,COMMAND,RESWORD,COMMENT,COMHASH}_CLR
+  local RESET DIM NODIM GRY DGY LGY LRD RED ORA YEL GRN CYN BLU PUR MAG LMA
 
   if (( do_colour )) {
-    RESET=$'\e[m' DIM=$'\e[2m' NODIM=$'\e[22m'
-    GRY=$'\e[2;97m'
+    RESET=$'\e[m'   DIM=$'\e[2m'        NODIM=$'\e[22m'
+    GRY=$'\e[2;97m' LGY=$'\e[38;5;103m' DGY=$'\e[38;5;240m'
 
     RED=$'\e[31m'
+    LRD=$'\e[91m'
     ORA=$'\e[38;5;216m'
     YEL=$'\e[93m'
     GRN=$'\e[92m'
     CYN=$'\e[96m'
     BLU=$'\e[94m'
+    PUR=$'\e[38;5;170m'
     MAG=$'\e[35m'
     LMA=$'\e[95m'
-
-    RESWORD_CLR=$'\e[95m'
-    OPTIONS_CLR=$'\e[38;5;170m'
-    BUILTIN_CLR=$'\e[91m'
-    COMMAND_CLR=$'\e[94m'
-
-    COMMENT_CLR=$'\e[38;5;103m'
-    COMHASH_CLR=$'\e[38;5;240m'
   }
+
+  local -r RESWORD_CLR="$LMA" OPTIONS_CLR="$PUR"
+  local -r BUILTIN_CLR="$LRD" COMMAND_CLR="$BLU"
+
+  local -r COMMENT_CLR="$LGY" COMHASH_CLR="$DGY"
 
   local -r SGL_QU="$DIM$GRN'$RESET"
   local -r DBL_QU="$DIM$GRN\"$RESET"
@@ -422,7 +420,7 @@ function whh::commands () { # <- whh::process_input <- whh
   }
 }
 
-# ——————————————————————————————————————————————————————————————————————————— #
+# —— whh::format_path () ———————————————————————————————————————————————————— #
 
 function whh::format_path () { # <- whh::commands <- whh::process_input <- whh
   line+="$CYN${${fmt_path/#$HOME/~}%/*}/"
