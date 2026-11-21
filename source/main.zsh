@@ -25,6 +25,7 @@ function whh () {
 
   # ———————————————————————————————————————————————————————————————————— #
 
+  local -ri 10 ROOT_FUNC_PID=$$
   local -r ROOT_FUNCNAME="${(%):-%N}"
 
   local -ra SEARCH_ORDER=(
@@ -40,9 +41,11 @@ function whh () {
 
   # ———————————————————————————————————————————————————————————————————— #
 
+  local -i 10 TABSIZE=4
   local -i 2 mark_alias_r=1
   local -i 2 do_double_dash=1
   local -i 2 do_posix_for_if=1
+  local -i 2 resolve_cmd_case=1
 
   local -i 2 do_colour=1
   local colour_arg='always'
@@ -51,16 +54,21 @@ function whh () {
 
   # ———————————————————————————————————————————————— #
 
-  local RESET DIM NODIM RED ORA YEL GRN CYN
+  local RESET DIM NODIM RED ORA YEL GRN CYN BLU MAG LMA GRY
   local {BUILTIN,OPTIONS,COMMAND,RESWORD,COMMENT,COMHASH}_CLR
 
   if (( do_colour )) {
     RESET=$'\e[m' DIM=$'\e[2m' NODIM=$'\e[22m'
+    GRY=$'\e[2;97m'
+
     RED=$'\e[31m'
     ORA=$'\e[38;5;216m'
     YEL=$'\e[93m'
     GRN=$'\e[92m'
     CYN=$'\e[96m'
+    BLU=$'\e[94m'
+    MAG=$'\e[35m'
+    LMA=$'\e[95m'
 
     RESWORD_CLR=$'\e[95m'
     OPTIONS_CLR=$'\e[38;5;170m'
@@ -83,8 +91,12 @@ function whh () {
   local -r   LOADED_MSG="$GRN$DIM(${NODIM}""loaded$DIM)$RESET"
   local -r UNLOADED_MSG="$YEL$DIM(${NODIM}unloaded$DIM)$RESET"
 
+  local -r  SYMLINK_ARROW=" $GRY-->$RESET "
+  local -r REALPATH_ARROW=" $BLU==>$RESET "
+
   local -r     LINE="$DIM${(r:COLUMNS  ::─:)}$RESET"
   local -r HALFLINE="$DIM${(r:COLUMNS/2::─:)}$RESET"
+  local -r QUARLINE="$DIM${(r:COLUMNS/4::─:)}$RESET"
 
   # ———————————————————————————————————————————————— #
 
@@ -92,10 +104,13 @@ function whh () {
   local -r NL=$'\n' HT=$'\t'
   local -r PRECMD='(-|builtin|command|exec|nocorrect|noglob)'
 
-  local -ri 10 TABSIZE=4
-
   local -ra COLOUR_PAGER=(
     bat --style=plain --paging=never --language=zsh --color="$colour_arg"
+  )
+
+  local -ra FILE_CMD=(
+    file -E --dereference --brief --preserve-date
+      --exclude=compress --exclude=tar --exclude=json --exclude=cdf
   )
 
   # ———————————————————————————————————————————————————————————————————— #
@@ -338,6 +353,83 @@ function whh::builtins () { # <- whh::process_input <- whh
 # —— whh::commands —————————————————————————————————————————————————————————— #
 
 function whh::commands () { # <- whh::process_input <- whh
+  local dir cmd_path
+  local -a match_arr magic_arr path_match
+
+  for dir in "${(@)path}"; {
+    if ! [[ -e "$dir/$input" ]] continue
+
+    cmd_path="$dir/$input"
+
+    if (( resolve_cmd_case )) {
+      path_match=( (#i)$cmd_path(DN) )
+      if ! (( $#path_match == 1 )) whh::error mult-cmd
+
+      cmd_path="$path_match[1]"
+    }
+
+    match_arr+="$cmd_path"
+    magic_arr+="$( "${(@z)FILE_CMD}" -- "$cmd_path" )"
+  }
+
+  # ———————————————————————————————————————————————— #
+
+  local -i 10 i
+  local -a links
+  local -i 2 is_exe
+  local target magic_out line realpath fmt_path
+
+  for cmd_path magic_out in "${(@)match_arr:^magic_arr}"; {
+
+    target="$cmd_path" line= links=()
+
+    while [[ -h $target ]] {
+      target="$( readlink "$target" )" || break
+      links+="$target"
+    }
+
+    # ———————————————————————————————————————————————— #
+
+    fmt_path="$cmd_path" is_exe=$(( $#links == 0 ))
+    whh::format_path
+
+    if (( $#links )) {
+      for i in {1..$#links}; {
+        line+="$SYMLINK_ARROW"
+
+        fmt_path="$links[i]" is_exe=$(( i == $#links ))
+        whh::format_path
+      }
+    }
+
+    # ———————————————————————————————————————————————— #
+
+    realpath="$( realpath -q "$cmd_path" )"
+
+    if [[ -n "$links" && "$realpath" != "$links[-1]" ]] {
+      line+="$REALPATH_ARROW"
+
+      fmt_path="$realpath" is_exe=1
+      whh::format_path
+    }
+
+    # ———————————————————————————————————————————————— #
+
+    output_lines+="${magic_out%%$NL*}"
+    output_lines+="$line"
+
+    # ———————————————————————————————————————————————— #
+  }
+}
+
+# ——————————————————————————————————————————————————————————————————————————— #
+
+function whh::format_path () { # <- whh::commands <- whh::process_input <- whh
+  line+="$CYN${${fmt_path/#$HOME/~}%/*}/"
+
+  if (( is_exe )) { line+="$RED" } else { line+="$MAG" }
+
+  line+="${fmt_path##*/}$RESET"
 }
 
 # ——————————————————————————————————————————————————————————————————————————— #
@@ -346,10 +438,11 @@ function whh::commands () { # <- whh::process_input <- whh
 function whh::error () { # <- ... <- whh
   local err=
   case "$1" {
+    ( mult-cmd  ) err="multiple commands found: ${(j:,:)path_match}" ;;
+    ( type-err  ) err="unknown type \`${type/%(e|)s}\`" ;;
     ( no-input  ) err='must provide an input'           ;;
     ( not-found ) err="\`$input\` not found"            ;;
-    ( type-err  ) err="unknown type \`${type/%(e|)s}\`" ;;
-    ( *         ) err='unknown error'                   ;;
+    ( *         ) err="$*"                              ;;
   }
 
   echo -E - "$RED$ROOT_FUNCNAME$RESET: $err"
@@ -361,4 +454,4 @@ function whh::error () { # <- ... <- whh
 # ——————————————————————————————————————————————————————————————————————————— #
 
 # spell:ignoreRegexp /[gs]aliases\b/g
-# spell:ignore nodim disb
+# spell:ignore nodim disb mult
